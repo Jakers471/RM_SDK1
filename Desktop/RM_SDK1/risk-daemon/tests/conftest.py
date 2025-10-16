@@ -80,6 +80,7 @@ class FakeClock:
 
     def __init__(self, initial_time: Optional[datetime] = None):
         self._current_time = initial_time or datetime(2025, 10, 15, 10, 0, 0, tzinfo=timezone.utc)
+        self.chicago_tz = pytz.timezone("America/Chicago")
 
     def now(self, tz: Optional[timezone] = None) -> datetime:
         """Get current time."""

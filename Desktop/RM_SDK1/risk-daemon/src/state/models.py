@@ -44,7 +44,7 @@ class EnforcementAction:
     """
     Enforcement action to be executed.
     """
-    action_type: str  # "close_position", "flatten_account", "set_lockout"
+    action_type: str  # "close_position", "flatten_account", "set_lockout", "reject_fill", "start_cooldown", "notify"
     account_id: str
     reason: str
     timestamp: datetime
@@ -55,6 +55,13 @@ class EnforcementAction:
 
     # For set_lockout
     lockout_until: Optional[datetime] = None
+
+    # For start_cooldown
+    duration_seconds: Optional[int] = None
+
+    # For notify (alert only)
+    severity: Optional[str] = None
+    message: Optional[str] = None
 
     # Notification fields
     notification_severity: str = "warning"
