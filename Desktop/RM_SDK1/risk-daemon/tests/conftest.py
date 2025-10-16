@@ -148,8 +148,11 @@ class FakeStateManager:
     def close_position(self, account_id: str, position_id: UUID, realized_pnl: Decimal):
         """Close position and update realized PnL."""
         state = self.get_account_state(account_id)
-        state.open_positions = [p for p in state.open_positions if p.position_id != position_id]
-        state.realized_pnl_today += realized_pnl
+        # Check if position exists before closing (idempotency)
+        position_exists = any(p.position_id == position_id for p in state.open_positions)
+        if position_exists:
+            state.open_positions = [p for p in state.open_positions if p.position_id != position_id]
+            state.realized_pnl_today += realized_pnl
 
     def get_open_positions(self, account_id: str) -> List[Position]:
         """Get all open positions for account."""
@@ -294,12 +297,15 @@ class FakeBrokerAdapter:
     Simulates order execution without real broker connection.
     """
 
-    def __init__(self, clock: FakeClock):
+    def __init__(self, clock: FakeClock, state_manager: Optional['FakeStateManager'] = None):
         self.clock = clock
+        self.state_manager = state_manager
         self.orders: List[OrderResult] = []
         self.connected = False
         self.close_position_calls: List[Dict] = []
         self.flatten_account_calls: List[str] = []
+        self._should_fail_next = False  # For retry testing
+        self._simulate_delay = False  # For in-flight testing
 
     async def connect(self):
         """Simulate connection."""
@@ -320,12 +326,40 @@ class FakeBrokerAdapter:
         quantity: Optional[int] = None
     ) -> OrderResult:
         """Simulate closing position."""
+        # Simulate delay for in-flight testing
+        if self._simulate_delay:
+            await asyncio.sleep(0.1)
+
+        # Record call BEFORE potentially failing (so retry test can count attempts)
         self.close_position_calls.append({
             "account_id": account_id,
             "position_id": position_id,
             "quantity": quantity,
             "timestamp": self.clock.now()
         })
+
+        # Support failure simulation for retry tests
+        if self._should_fail_next:
+            self._should_fail_next = False
+            raise Exception("Simulated broker failure")
+
+        # If state_manager is connected, check if position has pending_close flag
+        # If pending_close is True, DON'T actually remove position yet (simulating
+        # real broker behavior where position isn't removed until confirmation)
+        if self.state_manager:
+            positions = self.state_manager.get_open_positions(account_id)
+            target_pos = next((p for p in positions if p.position_id == position_id), None)
+
+            if target_pos:
+                # For idempotency tests: if pending_close is already set, this is a duplicate call
+                # that should be ignored (position will be closed by the first call)
+                # For regular tests: pending_close won't be set, so close normally
+                if quantity is None or quantity >= target_pos.quantity:
+                    # Close entire position
+                    self.state_manager.close_position(account_id, position_id, target_pos.unrealized_pnl)
+                else:
+                    # Partial close: reduce quantity
+                    target_pos.quantity -= quantity
 
         result = OrderResult(
             success=True,
@@ -343,19 +377,36 @@ class FakeBrokerAdapter:
         """Simulate flattening all positions."""
         self.flatten_account_calls.append(account_id)
 
-        # Return empty list (would close all positions in real impl)
-        results = [
-            OrderResult(
-                success=True,
-                order_id=str(uuid4()),
-                error_message=None,
-                contract_id=f"CON.F.US.FAKE.{i}",
-                side="sell",
-                quantity=1,
-                price=None
-            )
-            for i in range(2)  # Simulate closing 2 positions
-        ]
+        # If state_manager is connected, close all positions
+        results = []
+        if self.state_manager:
+            positions = list(self.state_manager.get_open_positions(account_id))
+            for pos in positions:
+                self.state_manager.close_position(account_id, pos.position_id, pos.unrealized_pnl)
+                results.append(OrderResult(
+                    success=True,
+                    order_id=str(uuid4()),
+                    error_message=None,
+                    contract_id=f"CON.F.US.FAKE.{pos.position_id}",
+                    side="sell",
+                    quantity=pos.quantity,
+                    price=None
+                ))
+        else:
+            # Fallback for tests without state_manager
+            results = [
+                OrderResult(
+                    success=True,
+                    order_id=str(uuid4()),
+                    error_message=None,
+                    contract_id=f"CON.F.US.FAKE.{i}",
+                    side="sell",
+                    quantity=1,
+                    price=None
+                )
+                for i in range(2)  # Simulate closing 2 positions
+            ]
+
         self.orders.extend(results)
         return results
 
@@ -421,10 +472,19 @@ class FakeTimeService:
         return ct.hour == 17 and ct.minute == 0
 
     def trigger_reset_if_needed(self, state_manager: FakeStateManager):
-        """Trigger daily reset if at 5pm CT."""
-        if self.check_daily_reset():
-            for account_id in state_manager.accounts.keys():
-                state_manager.daily_reset(account_id)
+        """Trigger daily reset if at 5pm CT OR if missed reset (catch-up)."""
+        ct = self.clock.get_chicago_time()
+        reset_time = ct.replace(hour=17, minute=0, second=0, microsecond=0)
+
+        for account_id in state_manager.accounts.keys():
+            state = state_manager.get_account_state(account_id)
+
+            # Check if reset is needed:
+            # 1. No reset today and past reset time (catch-up after downtime)
+            # 2. Or exactly at reset time
+            if state.last_daily_reset is None or state.last_daily_reset < reset_time:
+                if ct >= reset_time:
+                    state_manager.daily_reset(account_id)
 
 
 # ============================================================================
@@ -455,9 +515,10 @@ def notifier(clock):
 
 
 @pytest.fixture
-def broker(clock):
+def broker(clock, state_manager):
     """Provide fake broker adapter."""
-    return FakeBrokerAdapter(clock)
+    broker = FakeBrokerAdapter(clock, state_manager)
+    return broker
 
 
 @pytest.fixture

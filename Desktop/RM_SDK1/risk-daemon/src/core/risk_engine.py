@@ -57,6 +57,17 @@ class RiskEngine:
         """
         account_id = event.account_id
 
+        # Handle TIME_TICK events specially - evaluate for all accounts
+        if event.event_type == "TIME_TICK":
+            for acc_id in list(self.state_manager.accounts.keys()):
+                await self._evaluate_rules_for_account(acc_id, event)
+            return
+
+        # Handle FILL event FIRST (so position exists if we need to reject during lockout)
+        if event.event_type == "FILL":
+            account_state = self.state_manager.get_account_state(account_id)
+            await self._handle_fill_event(event, account_state)
+
         # Early exit if account is locked out
         if self.state_manager.is_locked_out(account_id):
             # If this is a FILL event during lockout, close it immediately
@@ -73,12 +84,19 @@ class RiskEngine:
                     )
             return
 
+        # Evaluate rules for this account
+        await self._evaluate_rules_for_account(account_id, event)
+
+    async def _evaluate_rules_for_account(self, account_id: str, event):
+        """
+        Evaluate all rules for a specific account.
+
+        Args:
+            account_id: Account ID to evaluate
+            event: Event that triggered evaluation
+        """
         # Get account state
         account_state = self.state_manager.get_account_state(account_id)
-
-        # Update state based on event (if FILL, add position)
-        if event.event_type == "FILL":
-            await self._handle_fill_event(event, account_state)
 
         # Evaluate all applicable rules
         violations = []

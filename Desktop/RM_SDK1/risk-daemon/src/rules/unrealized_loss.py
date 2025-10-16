@@ -80,7 +80,7 @@ class UnrealizedLossRule(RiskRule):
         return EnforcementAction(
             action_type="close_position",
             account_id=violation.account_id,
-            reason=f"Closing position due to unrealized loss limit (${self.limit:.2f})",
+            reason=f"UnrealizedLoss: Closing position due to unrealized loss limit (${self.limit:.2f})",
             timestamp=violation.timestamp,
             position_id=violation.data["position_id"],
             quantity=None,  # Close entire position

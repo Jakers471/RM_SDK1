@@ -7,8 +7,23 @@ Defines violations, enforcement actions, and other shared types.
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Dict, Optional
 from uuid import UUID
+
+
+@dataclass
+class Event:
+    """
+    Internal event model for risk manager.
+    """
+    event_id: UUID
+    event_type: str  # FILL, POSITION_UPDATE, CONNECTION_CHANGE, etc.
+    timestamp: datetime
+    priority: int
+    account_id: str
+    source: str
+    data: Dict
+    correlation_id: Optional[UUID] = None
 
 
 @dataclass
@@ -50,11 +65,13 @@ class EnforcementAction:
 class OrderResult:
     """
     Result of order execution attempt.
+
+    Returned by SDKAdapter.close_position() and flatten_account().
     """
-    success: bool
-    order_id: Optional[str]
-    error_message: Optional[str]
-    contract_id: str
-    side: str
-    quantity: int
-    price: Optional[Decimal]
+    success: bool                      # True if order placed successfully
+    order_id: Optional[str]            # Broker order ID (if success=True)
+    error_message: Optional[str]       # Error details (if success=False)
+    contract_id: str                   # Contract that was traded
+    side: str                          # "buy" or "sell"
+    quantity: int                      # Contracts ordered
+    price: Optional[Decimal]           # Limit price (None for market orders)

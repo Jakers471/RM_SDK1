@@ -312,6 +312,9 @@ class TestEnforcementIdempotency:
 
         enforcement = EnforcementEngine(broker, state_manager)
 
+        # Enable delay to simulate real async behavior
+        broker._simulate_delay = True
+
         pos = Position(
             position_id=uuid4(),
             account_id=account_id,

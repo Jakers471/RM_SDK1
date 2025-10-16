@@ -50,8 +50,8 @@ class DailyRealizedLossRule(RiskRule):
         unrealized = sum(p.unrealized_pnl for p in account_state.open_positions)
         combined = realized + unrealized
 
-        # Check violation (limit is negative, so combined < limit means breach)
-        if combined <= self.limit:
+        # Check violation (limit is negative, so combined < limit means EXCEEDING threshold)
+        if combined < self.limit:
             return RuleViolation(
                 rule_name=self.name,
                 severity="critical",
@@ -88,10 +88,20 @@ class DailyRealizedLossRule(RiskRule):
         if current_ct.hour >= 17:
             lockout_time += timedelta(days=1)
 
+        # Build detailed reason with PnL breakdown
+        realized = violation.data['realized']
+        unrealized = violation.data['unrealized']
+        combined = violation.data['combined']
+        reason = (
+            f"DailyRealizedLoss: Daily loss limit exceeded. "
+            f"Realized: ${realized:.2f}, Unrealized: ${unrealized:.2f}, Combined: ${combined:.2f}. "
+            f"Flattening account and locking until 5pm CT."
+        )
+
         return EnforcementAction(
             action_type="flatten_account",
             account_id=violation.account_id,
-            reason=f"Daily loss limit exceeded (${violation.data['combined']:.2f}). Flattening account and locking until 5pm CT.",
+            reason=reason,
             timestamp=violation.timestamp,
             lockout_until=lockout_time,
             notification_severity="critical",

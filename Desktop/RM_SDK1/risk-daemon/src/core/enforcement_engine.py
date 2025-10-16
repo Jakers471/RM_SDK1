@@ -45,6 +45,8 @@ class EnforcementEngine:
         self.state_manager = state_manager
         self.notifier = notifier
         self._in_flight_actions: Set[str] = set()
+        self._in_flight_tasks: dict = {}  # Maps action_key to asyncio.Task
+        self._lock = asyncio.Lock()  # For atomic check-and-set in flatten_account
 
     async def close_position(
         self,
@@ -70,7 +72,7 @@ class EnforcementEngine:
         # Generate action key for idempotency
         action_key = f"{account_id}_{position_id}_close"
 
-        # Check if already in flight
+        # Check if already in flight (fast path without lock)
         if action_key in self._in_flight_actions:
             return OrderResult(
                 success=False,
@@ -82,30 +84,42 @@ class EnforcementEngine:
                 price=None
             )
 
-        # Check if position is already pending close
-        positions = self.state_manager.get_open_positions(account_id)
-        target_position = next((p for p in positions if p.position_id == position_id), None)
+        # Atomic check-and-set
+        async with self._lock:
+            # Double-check after acquiring lock
+            if action_key in self._in_flight_actions:
+                return OrderResult(
+                    success=False,
+                    order_id=None,
+                    error_message="Close action already in progress",
+                    contract_id="",
+                    side="",
+                    quantity=0,
+                    price=None
+                )
 
-        if target_position and target_position.pending_close:
-            return OrderResult(
-                success=False,
-                order_id=None,
-                error_message="Position already pending close",
-                contract_id="",
-                side="",
-                quantity=0,
-                price=None
-            )
+            # Check if position is already pending close
+            positions = self.state_manager.get_open_positions(account_id)
+            target_position = next((p for p in positions if p.position_id == position_id), None)
 
-        # Mark as in-flight
-        self._in_flight_actions.add(action_key)
+            if target_position and target_position.pending_close:
+                return OrderResult(
+                    success=False,
+                    order_id=None,
+                    error_message="Position already pending close",
+                    contract_id="",
+                    side="",
+                    quantity=0,
+                    price=None
+                )
 
-        # Mark position as pending close
-        if target_position:
-            target_position.pending_close = True
+            # Mark as in-flight and mark position as pending close
+            self._in_flight_actions.add(action_key)
+            if target_position:
+                target_position.pending_close = True
 
+        # Execute close with retry logic (lock released)
         try:
-            # Execute close with retry logic
             result = await self._execute_with_retry(
                 self.broker.close_position,
                 max_retries,
@@ -113,12 +127,15 @@ class EnforcementEngine:
                 position_id=position_id,
                 quantity=quantity
             )
-
-            return result
-
-        finally:
-            # Remove from in-flight
+            # Remove from in_flight after successful completion
             self._in_flight_actions.discard(action_key)
+            return result
+        except Exception as e:
+            # On failure, remove from set to allow retry and clear pending flag
+            self._in_flight_actions.discard(action_key)
+            if target_position:
+                target_position.pending_close = False
+            raise
 
     async def flatten_account(
         self,
@@ -140,26 +157,32 @@ class EnforcementEngine:
         # Generate action key for idempotency
         action_key = f"{account_id}_flatten"
 
-        # Check if already in flight
+        # Check if already executed or in flight
         if action_key in self._in_flight_actions:
             return []
 
-        # Mark as in-flight
-        self._in_flight_actions.add(action_key)
+        # Atomic add to set
+        async with self._lock:
+            # Double-check after acquiring lock
+            if action_key in self._in_flight_actions:
+                return []
+            self._in_flight_actions.add(action_key)
 
+        # Execute flatten (lock released to allow other operations)
+        # Note: We do NOT remove from in_flight after completion because
+        # flatten is a terminal operation - once an account is flattened,
+        # we don't want to flatten it again in the same session.
         try:
-            # Execute flatten
             results = await self._execute_with_retry(
                 self.broker.flatten_account,
                 max_retries,
                 account_id=account_id
             )
-
             return results
-
-        finally:
-            # Remove from in-flight
+        except Exception as e:
+            # On failure, remove from set to allow retry
             self._in_flight_actions.discard(action_key)
+            raise
 
     async def execute_action(self, action: EnforcementAction):
         """
@@ -188,21 +211,24 @@ class EnforcementEngine:
                 )
 
         elif action.action_type == "flatten_account":
+            # Check if account is already locked out (indicates flatten already done)
+            was_already_locked_out = self.state_manager.is_locked_out(action.account_id)
+
             results = await self.flatten_account(
                 account_id=action.account_id,
                 reason=action.reason
             )
 
-            # Set lockout if specified
-            if action.lockout_until:
+            # Set lockout if specified and not already locked out
+            if action.lockout_until and not was_already_locked_out:
                 self.state_manager.set_lockout(
                     account_id=action.account_id,
                     until=action.lockout_until,
                     reason=action.reason
                 )
 
-            # Send notification
-            if self.notifier:
+            # Send notification if this is the FIRST time locking out (not a duplicate call)
+            if not was_already_locked_out and self.notifier:
                 self.notifier.send(
                     account_id=action.account_id,
                     title="CRITICAL: Daily Limit Exceeded",

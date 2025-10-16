@@ -86,6 +86,29 @@ class SessionBlockOutsideRule(RiskRule):
         if not self.enabled:
             return None
 
+        # Handle TIME_TICK events for session boundary detection
+        if event_data.get("tick_time"):
+            tick_time = event_data["tick_time"]
+            session_time = tick_time.astimezone(self.timezone)
+            current_time_only = session_time.time()
+
+            # Check if we've reached or passed session end (positions should be flattened)
+            for start_time, end_time in self.time_ranges:
+                # If current time >= end time, we're past session end
+                if current_time_only >= end_time:
+                    if len(account_state.open_positions) > 0:
+                        return RuleViolation(
+                            rule_name=self.name,
+                            severity="high",
+                            reason=f"Session end reached - flattening {len(account_state.open_positions)} open positions",
+                            account_id=account_state.account_id,
+                            timestamp=tick_time,
+                            data={
+                                "event": "session_end",
+                                "positions_count": len(account_state.open_positions)
+                            }
+                        )
+
         # Get event time
         event_time = event_data.get("fill_time") or event_data.get("update_time") or datetime.utcnow()
 
@@ -117,6 +140,18 @@ class SessionBlockOutsideRule(RiskRule):
         Returns:
             EnforcementAction to close the position
         """
+        # Session end: flatten entire account
+        if violation.data.get("event") == "session_end":
+            return EnforcementAction(
+                action_type="flatten_account",
+                account_id=violation.account_id,
+                reason="Session end - closing all positions",
+                timestamp=violation.timestamp,
+                notification_severity="warning",
+                notification_action="flatten_account"
+            )
+
+        # Outside session FILL: close single position
         return EnforcementAction(
             action_type="close_position",
             account_id=violation.account_id,
