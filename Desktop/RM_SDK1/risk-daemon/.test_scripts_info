@@ -1,0 +1,20 @@
+# Test Scripts Organization
+
+## MAIN SCRIPT (USE THIS):
+- `test` - Master script that does everything
+
+## OPTIONAL/LEGACY (Still work but not needed):
+- `run_tests.sh` - Basic test runner (replaced by: ./test)
+- `track_coverage.sh` - Coverage tracking (replaced by: ./test)
+- `cov` - Coverage report viewer (replaced by: ./test status)
+- `view` - HTML opener (replaced by: ./test view)
+- `menu.sh` - Interactive menu (replaced by: ./test menu)
+- `coverage_report.py` - Python report (replaced by: ./test status)
+- `ai_coverage_summary.py` - AI summary (replaced by: ./test ai)
+
+## STILL USEFUL:
+- `Makefile` - Standard make commands (alternative to ./test)
+- `COMMANDS.md` - Command reference
+- `README_TESTING.md` - Quick start guide
+
+The `./test` script combines all functionality into one simple command!

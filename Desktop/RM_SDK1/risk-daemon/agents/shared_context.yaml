@@ -1,0 +1,30 @@
+shared_paths:
+  src_dir: src/
+  tests_dir: tests/
+  arch_docs: docs/architecture/
+  integ_docs: docs/integration/
+
+  junit: reports/junit.xml
+  cov_raw: reports/coverage.json
+  cov_summary: reports/ai_coverage_summary.json
+  pytest_log: reports/pytest_last.txt
+
+  triage_md: docs/debug/triage_latest.md
+  triage_json: docs/debug/triage_summary.json
+  patch_latest: patches/latest.patch
+
+  sdk_repo: ../project-x-py/
+  sdk_index: docs/analysis/sdk_index.json
+  sdk_audit: docs/analysis/sdk_audit.md
+
+  plans_dir: docs/plans/
+  status_dir: docs/status/
+  sprint_board: docs/status/sprint_board.md
+  next_test_slice: docs/status/next_test_slice.md
+  dev_ready: docs/status/dev_ready.md
+  blockers: docs/status/blockers.md
+
+  trig_dir: .triggers/
+  trig_tests_failed: .triggers/tests_failed
+  trig_import_mismatch: .triggers/import_mismatch
+  trig_all_green: .triggers/all_green

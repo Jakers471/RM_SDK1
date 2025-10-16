@@ -1,0 +1,45 @@
+#!/bin/bash
+# Universal HTML report viewer - works in WSL, Git Bash, and regular bash
+
+REPORT="reports/coverage_html/index.html"
+
+if [ ! -f "$REPORT" ]; then
+    echo "Error: Coverage report not found at $REPORT"
+    echo "Run ./track_coverage.sh first to generate the report"
+    exit 1
+fi
+
+# Try different methods to open the HTML file
+if command -v explorer.exe &> /dev/null; then
+    # WSL or Windows with explorer - need full Windows path
+    # Get the absolute path
+    ABS_PATH=$(realpath "$REPORT")
+    # Convert to Windows path format
+    if [[ "$ABS_PATH" == /mnt/c/* ]]; then
+        # WSL path
+        WIN_PATH=${ABS_PATH/\/mnt\/c/C:}
+    elif [[ "$ABS_PATH" == /c/* ]]; then
+        # Git Bash path
+        WIN_PATH=${ABS_PATH/\/c/C:}
+    else
+        WIN_PATH="$ABS_PATH"
+    fi
+    # Convert forward slashes to backslashes for Windows
+    WIN_PATH=${WIN_PATH//\//\\}
+    explorer.exe "$WIN_PATH"
+elif command -v start &> /dev/null; then
+    # Git Bash or MinGW
+    start "$REPORT"
+elif command -v xdg-open &> /dev/null; then
+    # Linux desktop
+    xdg-open "$REPORT"
+elif command -v open &> /dev/null; then
+    # macOS
+    open "$REPORT"
+else
+    echo "Could not find a way to open the HTML file."
+    echo "Please open manually: $REPORT"
+    echo "Full path: $(realpath $REPORT)"
+fi
+
+echo "Opening coverage report in browser..."

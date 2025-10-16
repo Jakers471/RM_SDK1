@@ -1,0 +1,406 @@
+{
+  "version": "1.0.0",
+  "sdk": {
+    "name": "project-x-py",
+    "version": "3.5.9",
+    "repository": "https://github.com/TexasCoding/project-x-py",
+    "language": "Python",
+    "min_python_version": "3.12",
+    "broker_platform": "TopstepX",
+    "architecture": "async",
+    "event_model": "push_based_websocket"
+  },
+  "authentication": {
+    "method": "api_key_username",
+    "credentials_required": [
+      "PROJECT_X_API_KEY",
+      "PROJECT_X_USERNAME"
+    ],
+    "token_type": "JWT",
+    "auto_refresh": true,
+    "endpoints": {
+      "auth": "POST /api/Authentication/signIn"
+    }
+  },
+  "connection": {
+    "websocket_hubs": {
+      "user_hub": {
+        "url": "https://rtc.topstepx.com/hubs/user",
+        "purpose": "positions, orders, trades, account events"
+      },
+      "market_hub": {
+        "url": "https://rtc.topstepx.com/hubs/market",
+        "purpose": "quotes, trades, market depth"
+      }
+    },
+    "auto_reconnect": true,
+    "reconnect_strategy": "exponential_backoff",
+    "circuit_breaker": true
+  },
+  "capabilities": {
+    "pre_trade_rejection": false,
+    "post_trade_enforcement": true,
+    "real_time_events": true,
+    "position_queries": true,
+    "order_execution": true,
+    "market_data": true,
+    "unrealized_pnl_provided": false,
+    "realized_pnl_provided": false,
+    "stop_loss_metadata": false,
+    "flatten_all_native": false
+  },
+  "events": {
+    "ORDER_FILLED": {
+      "sdk_event_name": "order_filled",
+      "our_event_type": "FILL",
+      "priority": 2,
+      "data_mapping": {
+        "symbol": "extract_from(contractId)",
+        "side": "map(sdk.side, {0: 'long', 1: 'short'})",
+        "quantity": "sdk.size",
+        "fill_price": "Decimal(sdk.filledPrice)",
+        "order_id": "str(sdk.orderId)",
+        "fill_time": "parse_iso(sdk.fillTime)"
+      },
+      "example_sdk_payload": {
+        "orderId": 123456,
+        "contractId": "CON.F.US.MNQ.U25",
+        "side": 0,
+        "size": 1,
+        "filledPrice": 18000.0,
+        "fillTime": "2025-10-15T14:30:00Z",
+        "accountId": 789
+      }
+    },
+    "POSITION_UPDATED": {
+      "sdk_event_name": "position_updated",
+      "our_event_type": "POSITION_UPDATE",
+      "priority": 2,
+      "data_mapping": {
+        "position_id": "UUID(sdk.positionId)",
+        "symbol": "extract_from(sdk.contractId)",
+        "current_price": "from_price_cache(symbol)",
+        "unrealized_pnl": "calculate(position, current_price, tick_value)",
+        "quantity": "sdk.size",
+        "update_time": "parse_iso(sdk.updateTimestamp)"
+      },
+      "note": "SDK does NOT provide current_price or unrealized_pnl - must calculate",
+      "example_sdk_payload": {
+        "positionId": 67890,
+        "contractId": "CON.F.US.MNQ.U25",
+        "size": 1,
+        "averagePrice": 18000.0,
+        "updateTimestamp": "2025-10-15T14:31:00Z"
+      }
+    },
+    "POSITION_CLOSED": {
+      "sdk_event_name": "position_closed",
+      "our_event_type": null,
+      "note": "State update only, no internal event emitted",
+      "action": "remove_from_state(positionId)",
+      "example_sdk_payload": {
+        "positionId": 67890,
+        "contractId": "CON.F.US.MNQ.U25",
+        "closeTime": "2025-10-15T15:00:00Z"
+      }
+    },
+    "QUOTE_UPDATE": {
+      "sdk_event_name": "quote_update",
+      "our_event_type": null,
+      "note": "Update price cache only, no internal event",
+      "action": "update_price_cache(symbol, mid_price)",
+      "example_sdk_payload": {
+        "contractId": "CON.F.US.MNQ.U25",
+        "bid": 17995.0,
+        "ask": 18005.0,
+        "lastPrice": 18000.0,
+        "timestamp": "2025-10-15T14:32:00Z"
+      }
+    },
+    "CONNECTED": {
+      "sdk_event_name": "connected",
+      "our_event_type": "CONNECTION_CHANGE",
+      "priority": 1,
+      "data_mapping": {
+        "status": "'connected'",
+        "reason": "null",
+        "broker": "'topstepx'"
+      }
+    },
+    "DISCONNECTED": {
+      "sdk_event_name": "disconnected",
+      "our_event_type": "CONNECTION_CHANGE",
+      "priority": 1,
+      "data_mapping": {
+        "status": "'disconnected'",
+        "reason": "sdk.reason",
+        "broker": "'topstepx'"
+      }
+    },
+    "RECONNECTING": {
+      "sdk_event_name": "reconnecting",
+      "our_event_type": "CONNECTION_CHANGE",
+      "priority": 1,
+      "data_mapping": {
+        "status": "'reconnecting'",
+        "reason": "f'reconnection_attempt_{sdk.attempt}'",
+        "broker": "'topstepx'"
+      }
+    },
+    "ORDER_REJECTED": {
+      "sdk_event_name": "order_rejected",
+      "our_event_type": null,
+      "note": "Log error only, critical if enforcement order",
+      "action": "log_error(orderId, errorMessage)",
+      "example_sdk_payload": {
+        "orderId": 123456,
+        "errorMessage": "Insufficient margin",
+        "errorCode": 1001,
+        "timestamp": "2025-10-15T14:33:00Z"
+      }
+    }
+  },
+  "methods": {
+    "get_current_positions": {
+      "sdk_class": "ProjectX",
+      "sdk_method": "search_open_positions",
+      "signature": "async def search_open_positions(account_id: Optional[int] = None) -> List[Position]",
+      "endpoint": "POST /api/Position/searchOpen",
+      "returns": "List[Position]",
+      "position_fields": {
+        "id": "int",
+        "accountId": "int",
+        "contractId": "str",
+        "creationTimestamp": "str (ISO 8601)",
+        "type": "int (1=LONG, 2=SHORT)",
+        "size": "int",
+        "averagePrice": "float"
+      },
+      "notes": "Does NOT include unrealized PnL or stop loss info"
+    },
+    "close_position": {
+      "sdk_class": "OrderManager",
+      "sdk_method": "close_position",
+      "signature": "async def close_position(contract_id: str, method: str = 'market', limit_price: Optional[float] = None) -> OrderPlaceResponse",
+      "returns": "OrderPlaceResponse",
+      "response_fields": {
+        "orderId": "int",
+        "success": "bool",
+        "errorCode": "int",
+        "errorMessage": "Optional[str]"
+      },
+      "notes": "Queries position, places opposite-side market order"
+    },
+    "flatten_account": {
+      "sdk_class": null,
+      "sdk_method": null,
+      "notes": "NOT PROVIDED - must loop through positions and call close_position() for each",
+      "custom_implementation_required": true
+    },
+    "get_instrument": {
+      "sdk_class": "ProjectX",
+      "sdk_method": "get_instrument",
+      "signature": "async def get_instrument(contract_id: str) -> Instrument",
+      "returns": "Instrument",
+      "instrument_fields": {
+        "id": "str",
+        "name": "str",
+        "description": "str",
+        "tickSize": "float",
+        "tickValue": "float",
+        "activeContract": "bool"
+      },
+      "notes": "Use for tick value retrieval"
+    },
+    "get_current_price": {
+      "sdk_class": "RealtimeDataManager",
+      "sdk_method": "get_current_price",
+      "signature": "async def get_current_price() -> float",
+      "returns": "float (last price)",
+      "notes": "From WebSocket stream, may lag if no recent quotes"
+    },
+    "search_trades": {
+      "sdk_class": "ProjectX",
+      "sdk_method": "search_trades",
+      "signature": "async def search_trades(start_date: datetime, end_date: datetime, contract_id: Optional[str], limit: int) -> List[Trade]",
+      "endpoint": "GET /trades/search",
+      "returns": "List[Trade]",
+      "trade_fields": {
+        "id": "int",
+        "contractId": "str",
+        "price": "float",
+        "profitAndLoss": "Optional[float] (null for half-turn)",
+        "fees": "float",
+        "side": "int (0=BUY, 1=SELL)",
+        "size": "int",
+        "creationTimestamp": "str"
+      },
+      "notes": "Use for realized PnL calculation"
+    }
+  },
+  "tick_values": {
+    "note": "Query via get_instrument() - these are common values for reference",
+    "MNQ": {
+      "tickSize": 0.25,
+      "tickValue": 0.5,
+      "pointValue": 2.0,
+      "description": "E-mini NASDAQ-100 Futures"
+    },
+    "NQ": {
+      "tickSize": 0.25,
+      "tickValue": 5.0,
+      "pointValue": 20.0,
+      "description": "NASDAQ-100 Futures"
+    },
+    "MES": {
+      "tickSize": 0.25,
+      "tickValue": 1.25,
+      "pointValue": 5.0,
+      "description": "Micro E-mini S&P 500 Futures"
+    },
+    "ES": {
+      "tickSize": 0.25,
+      "tickValue": 12.5,
+      "pointValue": 50.0,
+      "description": "E-mini S&P 500 Futures"
+    },
+    "MGC": {
+      "tickSize": 0.1,
+      "tickValue": 1.0,
+      "pointValue": 10.0,
+      "description": "Micro Gold Futures"
+    }
+  },
+  "rate_limits": {
+    "requests_per_minute": 60,
+    "burst_limit": 10,
+    "enforced_by_sdk": true,
+    "retry_on_limit": true,
+    "retry_strategy": "exponential_backoff",
+    "max_retry_attempts": 3
+  },
+  "error_handling": {
+    "exceptions": {
+      "ProjectXAuthenticationError": "Authentication failed",
+      "ProjectXConnectionError": "Network or WebSocket connection failed",
+      "ProjectXOrderError": "Order placement/modification failed",
+      "ProjectXRateLimitError": "Rate limit exceeded",
+      "ProjectXServerError": "Broker API error (HTTP 5xx)"
+    },
+    "retry_triggers": [
+      "network_timeout",
+      "http_500",
+      "rate_limit_429"
+    ],
+    "non_retryable": [
+      "authentication_failure",
+      "invalid_order",
+      "insufficient_margin"
+    ]
+  },
+  "gaps_must_build": [
+    {
+      "gap": "pre_trade_rejection",
+      "reason": "impossible_client_side",
+      "mitigation": "post_fill_enforcement",
+      "expected_latency_ms": "120-500"
+    },
+    {
+      "gap": "flatten_all_native",
+      "reason": "not_provided_by_sdk",
+      "mitigation": "loop_through_positions",
+      "estimated_effort_hours": 2
+    },
+    {
+      "gap": "realized_pnl_tracking",
+      "reason": "not_provided_by_sdk",
+      "mitigation": "track_via_trades_query",
+      "estimated_effort_hours": 8
+    },
+    {
+      "gap": "unrealized_pnl_calculation",
+      "reason": "not_in_position_object",
+      "mitigation": "calculate_from_price_cache",
+      "estimated_effort_hours": 4
+    },
+    {
+      "gap": "daily_reset_5pm_ct",
+      "reason": "no_session_concept",
+      "mitigation": "custom_timer_pytz",
+      "estimated_effort_hours": 6
+    },
+    {
+      "gap": "time_tick_events",
+      "reason": "not_provided_by_sdk",
+      "mitigation": "asyncio_sleep_loop",
+      "estimated_effort_hours": 2
+    },
+    {
+      "gap": "stop_loss_detection",
+      "reason": "not_in_position_metadata",
+      "mitigation": "query_orders_separately",
+      "estimated_effort_hours": 8
+    },
+    {
+      "gap": "state_reconciliation",
+      "reason": "no_event_replay",
+      "mitigation": "query_rest_on_reconnect",
+      "estimated_effort_hours": 6
+    },
+    {
+      "gap": "notifications",
+      "reason": "out_of_sdk_scope",
+      "mitigation": "discord_telegram_webhooks",
+      "estimated_effort_hours": 4
+    }
+  ],
+  "integration_complexity": {
+    "overall": "medium",
+    "sdk_provides_percent": 75,
+    "must_build_percent": 25,
+    "estimated_effort_days": {
+      "developer": "4-6",
+      "test_orchestrator": "2-3"
+    }
+  },
+  "performance_targets": {
+    "enforcement_latency_p95_ms": 500,
+    "enforcement_latency_max_ms": 1000,
+    "event_processing_per_event_ms": 10,
+    "state_reconciliation_max_sec": 5,
+    "memory_usage_steady_state_mb": 100
+  },
+  "testing": {
+    "sandbox_available": "unknown",
+    "paper_trading_alternative": true,
+    "mock_sdk_required": true,
+    "integration_tests_require_credentials": true
+  },
+  "deployment": {
+    "installation": "pip install project-x-py==3.5.9",
+    "config_file": "~/.config/projectx/config.json",
+    "environment_variables": [
+      "PROJECT_X_API_KEY",
+      "PROJECT_X_USERNAME"
+    ]
+  },
+  "documentation": {
+    "sdk_github": "https://github.com/TexasCoding/project-x-py",
+    "sdk_pypi": "https://pypi.org/project/project-x-py/",
+    "our_integration_docs": [
+      "docs/integration/sdk_survey.md",
+      "docs/integration/capabilities_matrix.md",
+      "docs/integration/adapter_contracts.md",
+      "docs/integration/event_mapping.md",
+      "docs/integration/gaps_and_build_plan.md",
+      "docs/integration/risks_open_questions.md",
+      "docs/integration/handoff_to_dev_and_test.md"
+    ]
+  },
+  "approval": {
+    "status": "pending_product_owner_review",
+    "created_by": "RM-SDK-Analyst",
+    "created_date": "2025-10-15",
+    "version": "1.0.0"
+  }
+}

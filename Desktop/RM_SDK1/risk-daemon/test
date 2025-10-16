@@ -1,0 +1,224 @@
+#!/bin/bash
+# Master Test Runner - Everything in ONE command!
+# Usage: ./test [option]
+
+# Detect Python path
+if [ -d "/mnt/c" ]; then
+    PYTHON="/mnt/c/Users/jakers/AppData/Local/Programs/Python/Python313/python.exe"
+else
+    PYTHON="/c/Users/jakers/AppData/Local/Programs/Python/Python313/python.exe"
+fi
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Function to show quick status
+show_status() {
+    if [ -f "reports/coverage.json" ]; then
+        COVERAGE=$($PYTHON -c "import json; data=json.load(open('reports/coverage.json')); print(f\"{data['totals']['percent_covered']:.1f}\")" 2>/dev/null || echo "?")
+        echo -e "${BLUE}Current Coverage: ${YELLOW}${COVERAGE}%${NC}"
+    fi
+}
+
+# Function to run tests with coverage tracking
+run_with_tracking() {
+    # Save previous coverage if exists
+    if [ -f "reports/coverage.json" ]; then
+        cp reports/coverage.json reports/coverage_prev.json
+    fi
+
+    # Run tests
+    $PYTHON -m pytest "$@" --cov=src --cov-report=term-missing --cov-report=html:reports/coverage_html --cov-report=json:reports/coverage.json
+    TEST_EXIT=$?
+
+    # Show change if we have previous
+    if [ -f "reports/coverage_prev.json" ]; then
+        $PYTHON -c "
+import json
+prev = json.load(open('reports/coverage_prev.json'))
+curr = json.load(open('reports/coverage.json'))
+prev_pct = prev['totals']['percent_covered']
+curr_pct = curr['totals']['percent_covered']
+change = curr_pct - prev_pct
+if change > 0:
+    print(f'\n✅ Coverage IMPROVED: {prev_pct:.1f}% → {curr_pct:.1f}% (+{change:.1f}%)')
+elif change < 0:
+    print(f'\n⚠️  Coverage DECREASED: {prev_pct:.1f}% → {curr_pct:.1f}% ({change:.1f}%)')
+else:
+    print(f'\n➡️  Coverage unchanged: {curr_pct:.1f}%')
+" 2>/dev/null
+        rm reports/coverage_prev.json
+    fi
+
+    return $TEST_EXIT
+}
+
+# Main logic
+case "${1:-}" in
+    "")
+        # No args = run all with coverage tracking
+        echo -e "${GREEN}Running all tests with coverage...${NC}"
+        run_with_tracking
+        echo -e "\n${BLUE}View report: ${NC}./test view"
+        ;;
+
+    view|report|open)
+        # Open HTML report
+        if [ -f "reports/coverage_html/index.html" ]; then
+            echo -e "${BLUE}Opening coverage report...${NC}"
+            if command -v explorer.exe &> /dev/null; then
+                ABS_PATH=$(realpath "reports/coverage_html/index.html")
+                if [[ "$ABS_PATH" == /mnt/c/* ]]; then
+                    WIN_PATH=${ABS_PATH/\/mnt\/c/C:}
+                elif [[ "$ABS_PATH" == /c/* ]]; then
+                    WIN_PATH=${ABS_PATH/\/c/C:}
+                else
+                    WIN_PATH="$ABS_PATH"
+                fi
+                WIN_PATH=${WIN_PATH//\//\\}
+                explorer.exe "$WIN_PATH"
+            elif command -v start &> /dev/null; then
+                start "reports/coverage_html/index.html"
+            else
+                echo "Report at: reports/coverage_html/index.html"
+            fi
+        else
+            echo -e "${RED}No report found. Run './test' first${NC}"
+        fi
+        ;;
+
+    quick|fast)
+        # Run only likely-to-pass tests
+        echo -e "${YELLOW}Quick test (passing tests only)...${NC}"
+        $PYTHON -m pytest -x --lf --ff -q
+        ;;
+
+    failed|fail|f)
+        # Run only failing tests
+        echo -e "${RED}Running failing tests only...${NC}"
+        $PYTHON -m pytest --lf -v
+        ;;
+
+    p0|priority)
+        # Run P0 tests
+        echo -e "${YELLOW}Running Priority-0 tests...${NC}"
+        run_with_tracking -m p0
+        ;;
+
+    status|info|s)
+        # Show current status
+        show_status
+        echo ""
+        $PYTHON -c "
+import json
+data = json.load(open('reports/coverage.json'))
+files = [(f.replace('src\\\\', ''), d['summary']['percent_covered'])
+         for f, d in data['files'].items()]
+files.sort(key=lambda x: x[1])
+print('Files needing work:')
+for f, pct in files[:3]:
+    if pct < 80:
+        print(f'  {pct:5.1f}% - {f}')
+" 2>/dev/null || echo "Run './test' first to generate coverage"
+        ;;
+
+    ai|summary)
+        # Generate AI summary
+        echo -e "${BLUE}Generating AI summary...${NC}"
+        $PYTHON -c "
+import json
+from pathlib import Path
+
+if not Path('reports/coverage.json').exists():
+    print('No coverage data. Run ./test first')
+    exit(1)
+
+data = json.load(open('reports/coverage.json'))
+totals = data['totals']
+
+# Find problem areas
+problems = []
+for f, d in data['files'].items():
+    pct = d['summary']['percent_covered']
+    if pct < 80 and d['summary']['missing_lines'] > 0:
+        problems.append({
+            'file': f.replace('src\\\\', ''),
+            'coverage': pct,
+            'missing': d['summary']['missing_lines']
+        })
+
+problems.sort(key=lambda x: x['coverage'])
+
+summary = {
+    'coverage': totals['percent_covered'],
+    'tested_lines': totals['num_statements'] - totals['missing_lines'],
+    'total_lines': totals['num_statements'],
+    'files_below_80': len(problems),
+    'worst_files': problems[:3]
+}
+
+json.dump(summary, open('reports/ai_summary.json', 'w'), indent=2)
+print(json.dumps(summary, indent=2))
+print('\nSaved to: reports/ai_summary.json')
+"
+        ;;
+
+    clean)
+        # Clear cache
+        echo -e "${YELLOW}Clearing cache...${NC}"
+        rm -rf .pytest_cache __pycache__ tests/__pycache__ src/__pycache__
+        echo "Cache cleared!"
+        ;;
+
+    watch)
+        # Watch mode - re-run on changes
+        echo -e "${BLUE}Watching for changes... (Ctrl+C to stop)${NC}"
+        while true; do
+            clear
+            show_status
+            $PYTHON -m pytest -q
+            echo -e "\n${YELLOW}Waiting for changes...${NC}"
+            sleep 2
+        done
+        ;;
+
+    menu|m)
+        # Show menu
+        clear
+        echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
+        echo -e "${BLUE}║         QUICK TEST COMMANDS               ║${NC}"
+        echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "${GREEN}Usage:${NC} ./test [command]"
+        echo ""
+        echo -e "  ${YELLOW}./test${NC}           Run all tests with coverage"
+        echo -e "  ${YELLOW}./test view${NC}      Open HTML report"
+        echo -e "  ${YELLOW}./test quick${NC}     Run passing tests only"
+        echo -e "  ${YELLOW}./test failed${NC}    Run failing tests only"
+        echo -e "  ${YELLOW}./test p0${NC}        Run priority tests"
+        echo -e "  ${YELLOW}./test status${NC}    Show coverage status"
+        echo -e "  ${YELLOW}./test ai${NC}        Generate AI summary"
+        echo -e "  ${YELLOW}./test clean${NC}     Clear cache"
+        echo -e "  ${YELLOW}./test watch${NC}     Auto-run on changes"
+        echo -e "  ${YELLOW}./test menu${NC}      Show this help"
+        echo ""
+        show_status
+        ;;
+
+    help|h|-h|--help)
+        # Show help
+        echo "Usage: ./test [command]"
+        echo "Commands: (none), view, quick, failed, p0, status, ai, clean, watch, menu"
+        echo "Run './test menu' for details"
+        ;;
+
+    *)
+        # Assume it's a test file or pytest args
+        echo -e "${GREEN}Running: pytest $@${NC}"
+        run_with_tracking "$@"
+        ;;
+esac

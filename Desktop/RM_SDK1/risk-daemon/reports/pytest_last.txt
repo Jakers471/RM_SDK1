@@ -1,0 +1,106 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.2, pluggy-1.6.0
+rootdir: /mnt/c/Users/jakers/Desktop/RM_SDK1/risk-daemon
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.11.0, asyncio-1.2.0, cov-7.0.0, mock-3.15.1, respx-0.22.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 44 items / 2 deselected / 42 selected
+run-last-failure: rerun previous 14 failures first
+
+tests/test_p0_1_max_contracts.py::TestMaxContractsIntegration::test_excess_contracts_closed_automatically FAILED [  2%]
+
+=================================== FAILURES ===================================
+____ TestMaxContractsIntegration.test_excess_contracts_closed_automatically ____
+
+self = <test_p0_1_max_contracts.TestMaxContractsIntegration object at 0x74673ff0ab70>
+state_manager = <conftest.FakeStateManager object at 0x746740301d60>
+broker = <conftest.FakeBrokerAdapter object at 0x7467404dfdd0>
+account_id = 'TEST_ACCOUNT_123'
+
+    @pytest.mark.asyncio
+    async def test_excess_contracts_closed_automatically(
+        self,
+        state_manager,
+        broker,
+        account_id
+    ):
+        """
+        Test: When fill causes total to exceed limit, excess is closed.
+    
+        Scenario:
+        - Limit: 4 contracts
+        - Current: 2 MNQ long
+        - New fill: 3 ES long
+        - Expected: 1 ES closed immediately (total = 4)
+        """
+        # WILL FAIL: RiskEngine class doesn't exist yet
+        from src.core.risk_engine import RiskEngine
+        from src.rules.max_contracts import MaxContractsRule
+        from src.core.enforcement_engine import EnforcementEngine
+        from tests.conftest import Position, Event
+    
+        # Setup enforcement engine
+        enforcement = EnforcementEngine(broker, state_manager)
+    
+        # Setup risk engine with MaxContracts rule
+        rule = MaxContractsRule(max_contracts=4)
+        risk_engine = RiskEngine(
+            state_manager=state_manager,
+            enforcement_engine=enforcement,
+            rules=[rule]
+        )
+    
+        # Add existing position: 2 MNQ
+        pos1 = Position(
+            position_id=uuid4(),
+            account_id=account_id,
+            symbol="MNQ",
+            side="long",
+            quantity=2,
+            entry_price=Decimal("18000"),
+            current_price=Decimal("18000"),
+            unrealized_pnl=Decimal("0"),
+            opened_at=state_manager.clock.now()
+        )
+        state_manager.add_position(account_id, pos1)
+    
+        # Simulate fill event: 3 ES long (would make total = 5)
+        fill_event = Event(
+            event_id=uuid4(),
+            event_type="FILL",
+            timestamp=state_manager.clock.now(),
+            priority=2,
+            account_id=account_id,
+            source="broker",
+            data={
+                "symbol": "ES",
+                "side": "long",
+                "quantity": 3,
+                "fill_price": Decimal("4500"),
+                "order_id": "ORD123",
+                "fill_time": state_manager.clock.now()
+            }
+        )
+    
+        # Process event through risk engine
+        await risk_engine.process_event(fill_event)
+    
+        # Verify enforcement: should close 1 ES contract
+        assert len(broker.close_position_calls) == 1
+        close_call = broker.close_position_calls[0]
+>       assert close_call["quantity"] == 1
+E       assert 4 == 1
+
+tests/test_p0_1_max_contracts.py:254: AssertionError
+=============================== warnings summary ===============================
+tests/test_p0_1_max_contracts.py::TestMaxContractsIntegration::test_excess_contracts_closed_automatically
+  /mnt/c/Users/jakers/Desktop/RM_SDK1/risk-daemon/src/rules/max_contracts.py:61: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /mnt/c/Users/jakers/Desktop/RM_SDK1/risk-daemon/reports/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_p0_1_max_contracts.py::TestMaxContractsIntegration::test_excess_contracts_closed_automatically
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+================== 1 failed, 2 deselected, 1 warning in 3.26s ==================

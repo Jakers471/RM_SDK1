@@ -1,0 +1,22 @@
+#!/bin/bash
+# Universal coverage command - works in WSL, Git Bash, and regular bash
+
+# Try different Python paths until one works
+if [ -x "/mnt/c/Users/jakers/AppData/Local/Programs/Python/Python313/python.exe" ]; then
+    PYTHON="/mnt/c/Users/jakers/AppData/Local/Programs/Python/Python313/python.exe"
+elif [ -x "/c/Users/jakers/AppData/Local/Programs/Python/Python313/python.exe" ]; then
+    PYTHON="/c/Users/jakers/AppData/Local/Programs/Python/Python313/python.exe"
+elif command -v python3 &> /dev/null; then
+    PYTHON="python3"
+elif command -v python &> /dev/null; then
+    PYTHON="python"
+else
+    echo "Error: No Python found! Please install Python or update this script."
+    exit 1
+fi
+
+# Show what we're using
+echo "Using Python: $PYTHON"
+
+# Run the coverage report
+$PYTHON coverage_report.py
