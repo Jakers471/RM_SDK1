@@ -1,0 +1,141 @@
+# Agent Workflow Definitions
+# Defines the primary workflows for agent orchestration with parallel execution support
+# All paths reference shared_context.yaml for consistency
+# Supports run_id for parallel execution isolation
+
+workflows:
+  idea_to_feature:
+    description: "Transform architectural ideas into tested features with autonomous deployment"
+    parallel_safe: true
+    steps:
+      - agent: rm-planner
+        trigger: manual
+        outputs: "${shared_paths.plans_dir}/runs/${run_id}/"
+        description: "Design and document the feature architecture"
+
+      - agent: rm-coordinator
+        trigger: on_completion
+        inputs: "${shared_paths.plans_dir}/runs/${run_id}/"
+        outputs: "${shared_paths.status_dir}/runs/${run_id}/"
+        description: "Coordinate implementation tasks"
+
+      - parallel_group:
+          description: "Analysis and review agents (can run in parallel)"
+          agents:
+            - agent: rm-sdk-analyst
+              outputs: "${shared_paths.status_dir}/runs/${run_id}/sdk/"
+              description: "Analyze SDK capabilities"
+            - agent: doc-reviewer
+              outputs: "${shared_paths.status_dir}/runs/${run_id}/docs/"
+              description: "Review documentation"
+
+      - agent: rm-test-orchestrator
+        trigger: on_completion
+        inputs: "${shared_paths.status_dir}/runs/${run_id}/"
+        outputs: "${shared_paths.tests_dir}runs/${run_id}/"
+        description: "Create comprehensive test suites"
+
+      - agent: rm-developer
+        trigger: on_completion
+        single_writer: true
+        inputs: "${shared_paths.tests_dir}runs/${run_id}/"
+        description: "Implement code to make tests pass"
+
+      - agent: rm-test-orchestrator
+        trigger: on_completion
+        mode: verify
+        outputs: "${shared_paths.status_dir}/runs/${run_id}/test_results/"
+        description: "Verify all tests pass"
+
+      - parallel_group:
+          description: "Final validation (can run in parallel)"
+          agents:
+            - agent: doc-reviewer
+              mode: final
+              outputs: "${shared_paths.status_dir}/runs/${run_id}/final_docs/"
+            - agent: integration-validator
+              outputs: "${shared_paths.status_dir}/runs/${run_id}/integration/"
+
+      - agent: auto-commit
+        trigger: on_all_green
+        inputs: "${shared_paths.status_dir}/runs/${run_id}/"
+        creates_branch: true
+        creates_pr: true
+        description: "Commit, push, and create PR"
+
+  tests_failed_triage:
+    description: "Debug and fix failing tests automatically"
+    parallel_safe: true
+    trigger:
+      watch: ${shared_paths.trig_dir}/runs/${run_id}/tests_failed
+    steps:
+      - agent: test-failure-debugger
+        outputs: "${shared_paths.status_dir}/runs/${run_id}/debug/"
+        description: "Analyze failures and create patches"
+
+      - agent: rm-developer
+        single_writer: true
+        inputs: "${shared_paths.status_dir}/runs/${run_id}/debug/patches/"
+        description: "Apply fixes to implementation"
+
+      - agent: rm-test-orchestrator
+        mode: verify
+        outputs: "${shared_paths.status_dir}/runs/${run_id}/retest/"
+        description: "Re-run tests to verify fixes"
+
+  import_mismatch_audit:
+    description: "Audit and fix SDK import mismatches"
+    parallel_safe: true
+    trigger:
+      watch: ${shared_paths.trig_dir}/runs/${run_id}/import_mismatch
+    steps:
+      - agent: rm-sdk-analyst
+        outputs: "${shared_paths.status_dir}/runs/${run_id}/sdk_audit/"
+        description: "Analyze SDK usage and mismatches"
+
+      - agent: rm-developer
+        single_writer: true
+        inputs: "${shared_paths.status_dir}/runs/${run_id}/sdk_audit/"
+        description: "Fix import issues"
+
+      - agent: rm-test-orchestrator
+        mode: verify
+        outputs: "${shared_paths.status_dir}/runs/${run_id}/import_tests/"
+        description: "Validate fixes with tests"
+
+  docs_sync_and_commit:
+    description: "Sync documentation and auto-commit on all tests passing"
+    parallel_safe: false  # Should be last in pipeline
+    trigger:
+      watch: ${shared_paths.trig_dir}/runs/${run_id}/all_green
+    steps:
+      - parallel_group:
+          agents:
+            - agent: doc-reviewer
+              mode: final
+              outputs: "${shared_paths.status_dir}/runs/${run_id}/final_review/"
+            - agent: integration-validator
+              mode: final
+              outputs: "${shared_paths.status_dir}/runs/${run_id}/final_validation/"
+
+      - agent: auto-commit
+        inputs: "${shared_paths.status_dir}/runs/${run_id}/"
+        creates_branch: true
+        creates_pr: true
+        push_to_remote: true
+        description: "Commit validated changes and create PR"
+
+# Parallel execution safety rules
+parallel_safety:
+  single_writers:
+    - rm-developer: "${shared_paths.src_dir}"  # Only agent that writes to src/
+    - rm-test-orchestrator: "${shared_paths.tests_dir}"  # Only agent that writes tests
+    - auto-commit: ".git/"  # Only agent that commits
+
+  advisory_locks:
+    - sprint_board: "${shared_paths.status_dir}/sprint_board.md"
+    - latest_pointer: "${shared_paths.status_dir}/latest/"
+
+  run_isolation:
+    - pattern: "*/runs/${run_id}/*"
+    - latest_update: "atomic_copy"  # Copy to latest/ only after success
