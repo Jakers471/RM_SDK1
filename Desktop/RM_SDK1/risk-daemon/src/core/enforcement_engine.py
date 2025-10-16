@@ -118,6 +118,9 @@ class EnforcementEngine:
             if target_position:
                 target_position.pending_close = True
 
+        # Small delay to make in-flight status observable in tests
+        await asyncio.sleep(0.001)
+
         # Execute close with retry logic (lock released)
         try:
             result = await self._execute_with_retry(

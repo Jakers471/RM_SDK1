@@ -7,7 +7,7 @@ Does NOT cause lockout (only daily limit causes lockout).
 Architecture reference: docs/architecture/02-risk-engine.md (Rule 2)
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
@@ -55,7 +55,7 @@ class UnrealizedLossRule(RiskRule):
                     severity="warning",
                     reason=f"Position unrealized loss ${position.unrealized_pnl:.2f} exceeds limit ${self.limit:.2f}",
                     account_id=account_state.account_id,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     data={
                         "position_id": position.position_id,
                         "symbol": position.symbol,

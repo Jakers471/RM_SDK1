@@ -108,6 +108,9 @@ class TestEnforcementIdempotency:
             rules=[rule]
         )
 
+        # Enable delay to simulate broker processing time
+        broker._simulate_delay = True
+
         # Add position with loss
         pos = Position(
             position_id=uuid4(),

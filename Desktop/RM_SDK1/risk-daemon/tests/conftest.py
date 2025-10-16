@@ -344,23 +344,26 @@ class FakeBrokerAdapter:
             self._should_fail_next = False
             raise Exception("Simulated broker failure")
 
-        # If state_manager is connected, check if position has pending_close flag
-        # If pending_close is True, DON'T actually remove position yet (simulating
-        # real broker behavior where position isn't removed until confirmation)
+        # If state_manager is connected, handle position closing
         if self.state_manager:
             positions = self.state_manager.get_open_positions(account_id)
             target_pos = next((p for p in positions if p.position_id == position_id), None)
 
             if target_pos:
-                # For idempotency tests: if pending_close is already set, this is a duplicate call
-                # that should be ignored (position will be closed by the first call)
-                # For regular tests: pending_close won't be set, so close normally
-                if quantity is None or quantity >= target_pos.quantity:
-                    # Close entire position
-                    self.state_manager.close_position(account_id, position_id, target_pos.unrealized_pnl)
+                # Check if we're simulating delay for async behavior testing
+                # In that case, don't immediately close positions with pending_close
+                if self._simulate_delay and target_pos.pending_close:
+                    # For idempotency testing: position stays open with pending_close=True
+                    # This simulates the broker taking time to process the close
+                    pass
                 else:
-                    # Partial close: reduce quantity
-                    target_pos.quantity -= quantity
+                    # Normal operation: close the position immediately
+                    if quantity is None or quantity >= target_pos.quantity:
+                        # Close entire position
+                        self.state_manager.close_position(account_id, position_id, target_pos.unrealized_pnl)
+                    else:
+                        # Partial close: reduce quantity
+                        target_pos.quantity -= quantity
 
         result = OrderResult(
             success=True,
