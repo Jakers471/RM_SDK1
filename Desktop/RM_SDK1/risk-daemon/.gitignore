@@ -12,3 +12,4 @@ reports/
 coverage.json
 *.html
 
+.env
