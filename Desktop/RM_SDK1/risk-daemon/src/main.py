@@ -224,6 +224,10 @@ class RiskDaemon:
         # Load rules from configuration
         rule_config = self.config.get('rules', {})
 
+        # Debug logging
+        logger.debug(f"Rule config: {rule_config}")
+        logger.debug(f"Rule config type: {type(rule_config)}")
+
         if rule_config.get('max_contracts', {}).get('enabled', False):
             from src.rules.max_contracts_per_instrument import MaxContractsPerInstrumentRule
             # Convert single limit to all-symbols limit
@@ -252,7 +256,10 @@ class RiskDaemon:
                 profit_target=Decimal(str(limit_value))
             ))
 
-        if rule_config.get('session_block', {}).get('enabled', False):
+        session_block_config = rule_config.get('session_block', {})
+        logger.debug(f"Session block config: {session_block_config}, type: {type(session_block_config)}")
+
+        if isinstance(session_block_config, dict) and session_block_config.get('enabled', False):
             from src.rules.session_block import SessionBlockOutsideRule
             # Default session block: Mon-Fri, 8am-3pm CT
             rules.append(SessionBlockOutsideRule(
