@@ -115,14 +115,14 @@ async def test_disconnect_closes_connection_gracefully(sdk_adapter, mock_trading
         mock_ts_class.create = AsyncMock(return_value=mock_trading_suite)
         await sdk_adapter.connect()
 
-        mock_trading_suite.close = AsyncMock()
+        mock_trading_suite.disconnect = AsyncMock()
 
         # Execute
         await sdk_adapter.disconnect()
 
         # Assert: Connection closed
         assert sdk_adapter.is_connected() is False
-        mock_trading_suite.close.assert_called_once()
+        mock_trading_suite.disconnect.assert_called_once()
 
 
 @pytest.mark.asyncio
