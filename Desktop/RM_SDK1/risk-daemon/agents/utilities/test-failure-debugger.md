@@ -107,21 +107,37 @@ Structure:
 
 #### 2. Patch File: `${shared_paths.patch_latest}`
 
-- Use unified diff format (compatible with `git apply`)
+- **CRITICAL**: Use PLAIN unified diff format (compatible with `git apply`)
+- **DO NOT** use `git format-patch` - it adds email headers that break `git apply`
+- **DO NOT** include email headers (From, Date, Subject, etc.)
+- Start directly with `diff --git` lines
 - Include context lines (typically 3 lines before/after)
 - Keep total changes ≤50 LOC when possible
 - Add clear comments in the patch if the fix is non-obvious
 
-Format:
+**Correct Format** (starts with `diff --git`, NO email headers):
 ```diff
---- a/${shared_paths.src_dir}module/file.py
-+++ b/${shared_paths.src_dir}module/file.py
+diff --git a/src/module/file.py b/src/module/file.py
+index 1234567..abcdefg 100644
+--- a/src/module/file.py
++++ b/src/module/file.py
 @@ -10,7 +10,7 @@
  context line
  context line
 -old code
 +new code
  context line
+```
+
+**WRONG Format** (has email headers - DO NOT USE):
+```
+From abc123def456 Mon Sep 17 00:00:00 2001
+From: Agent <agent@example.com>
+Date: Mon, 1 Jan 2024 00:00:00 +0000
+Subject: [PATCH] Fix something
+
+diff --git a/src/file.py b/src/file.py
+...
 ```
 
 #### 3. Application Guide: Append to `${shared_paths.triage_md}`
@@ -166,7 +182,9 @@ git apply -R ${shared_paths.patch_latest}
 - Change test specifications (unless the test itself is incorrect)
 
 **ALWAYS**:
-- Produce patches in unified diff format
+- Produce patches in PLAIN unified diff format (start with `diff --git`, NO email headers)
+- Use `git diff` output format, NOT `git format-patch` format
+- Test that your patch would work with `git apply patches/latest.patch`
 - Document your reasoning in the triage report
 - Verify patch syntax before delivery
 - Keep changes surgical and focused
