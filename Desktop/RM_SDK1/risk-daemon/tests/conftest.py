@@ -6,6 +6,7 @@ Does NOT import the SDK - all tests rely on contract-defined interfaces.
 """
 
 import asyncio
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -14,6 +15,33 @@ from uuid import UUID, uuid4
 
 import pytest
 import pytz
+
+
+# ============================================================================
+# Pytest Hooks - Skip integration tests by default
+# ============================================================================
+
+def pytest_collection_modifyitems(config, items):
+    """
+    Skip integration tests by default unless ENABLE_INTEGRATION=1.
+
+    Integration tests are opt-in to keep test suite fast.
+    Run with: ENABLE_INTEGRATION=1 pytest
+    """
+    enable_integration = os.getenv("ENABLE_INTEGRATION", "0") == "1"
+    enable_realtime = os.getenv("ENABLE_REALTIME", "0") == "1"
+
+    skip_integration = pytest.mark.skip(reason="Integration tests require ENABLE_INTEGRATION=1")
+    skip_realtime = pytest.mark.skip(reason="Realtime tests require ENABLE_REALTIME=1")
+
+    for item in items:
+        # Skip integration tests unless explicitly enabled
+        if "integration" in item.keywords and not enable_integration:
+            item.add_marker(skip_integration)
+
+        # Skip realtime tests unless explicitly enabled
+        if "realtime" in item.keywords and not enable_realtime:
+            item.add_marker(skip_realtime)
 
 
 # ============================================================================
@@ -665,4 +693,442 @@ def valid_notifications_config():
             "bot_token": "",
             "chat_id": ""
         }
+    }
+
+
+# ============================================================================
+# Logging Test Fixtures (for Component 20: Logging Framework)
+# ============================================================================
+
+
+@pytest.fixture
+def temp_log_dir():
+    """Provide temporary log directory for logging tests."""
+    import tempfile
+    import shutil
+
+    temp_dir = tempfile.mkdtemp()
+    yield temp_dir
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def valid_logging_config():
+    """Provide valid logging configuration dictionary for testing."""
+    return {
+        "log_level": "info",
+        "log_path": "~/.risk_manager/logs/",
+        "rotation": {
+            "max_size_mb": 50,
+            "max_files": 10,
+            "compress": False
+        },
+        "retention_days": 90,
+        "structured_format": True,
+        "windows_event_log": {
+            "enabled": True,
+            "log_critical_only": True
+        }
+    }
+
+
+# ============================================================================
+# Phase 3: Connection Manager & State Recovery Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def mock_sdk_adapter():
+    """
+    Provide mock SDK adapter for connection manager testing.
+
+    Supports connection simulation, failure injection, and reconnection testing.
+    """
+    from unittest.mock import AsyncMock, Mock
+
+    sdk = AsyncMock()
+    sdk.connect = AsyncMock()
+    sdk.disconnect = AsyncMock()
+    sdk.is_connected = Mock(return_value=True)
+    sdk.ping = AsyncMock()
+    sdk.ping_http = AsyncMock()
+    sdk.is_websocket_connected = Mock(return_value=True)
+    sdk.get_all_open_positions = AsyncMock(return_value=[])
+    sdk.get_latest_quote = AsyncMock(return_value={"last_price": 5000.00})
+    sdk.get_recent_fills = AsyncMock(return_value=[])
+    sdk.query_positions_http = AsyncMock(return_value=[])
+
+    # Failure injection support
+    sdk.connect_fail_count = 0  # Number of times to fail connection
+    sdk.should_fail_ping = False
+
+    async def connect_with_failure():
+        if sdk.connect_fail_count > 0:
+            sdk.connect_fail_count -= 1
+            raise ConnectionError("Simulated connection failure")
+        sdk.is_connected.return_value = True
+
+    sdk.connect.side_effect = connect_with_failure
+
+    return sdk
+
+
+@pytest.fixture
+def temp_state_db():
+    """
+    Provide temporary state database path for testing.
+
+    Creates a unique temp file path and cleans up after test.
+    """
+    import tempfile
+    import os
+
+    # Create temp file path
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    os.unlink(path)  # Remove the file, just want the path
+
+    yield path
+
+    # Cleanup
+    if os.path.exists(path):
+        os.unlink(path)
+
+
+@pytest.fixture
+def mock_connection_health():
+    """
+    Provide mock connection health status for partial disconnect testing.
+    """
+    return {
+        'http_connected': True,
+        'websocket_connected': True,
+        'last_heartbeat': datetime.now(timezone.utc),
+        'uptime_seconds': 0.0
+    }
+
+
+@pytest.fixture
+def simulated_disconnect_event():
+    """
+    Provide simulated disconnect event for testing connection manager.
+    """
+    return {
+        'event_type': 'CONNECTION_LOST',
+        'timestamp': datetime.now(timezone.utc),
+        'reason': 'Network timeout',
+        'can_reconnect': True
+    }
+
+
+@pytest.fixture
+def crash_simulator():
+    """
+    Provide crash simulation utility for state recovery testing.
+
+    Allows tests to simulate daemon crashes at specific points.
+    """
+    class CrashSimulator:
+        def __init__(self):
+            self.crash_on_next = False
+            self.crash_after_calls = 0
+            self.call_count = 0
+
+        def inject_crash_after(self, calls: int):
+            """Inject crash after N calls."""
+            self.crash_after_calls = calls
+            self.call_count = 0
+
+        def check_and_crash(self):
+            """Check if should crash and raise exception if so."""
+            self.call_count += 1
+            if self.crash_on_next:
+                self.crash_on_next = False
+                raise Exception("Simulated crash")
+            if self.crash_after_calls > 0 and self.call_count >= self.crash_after_calls:
+                raise Exception("Simulated crash after N calls")
+
+    return CrashSimulator()
+
+
+@pytest.fixture
+def state_backup_manager():
+    """
+    Provide state backup manager for backup/rollback testing.
+    """
+    class StateBackupManager:
+        def __init__(self):
+            self.backups = {}
+
+        def create_backup(self, name: str, state: Dict):
+            """Create state backup with given name."""
+            import copy
+            self.backups[name] = copy.deepcopy(state)
+
+        def restore_backup(self, name: str) -> Optional[Dict]:
+            """Restore state from backup."""
+            return self.backups.get(name)
+
+        def list_backups(self) -> List[str]:
+            """List all backup names."""
+            return list(self.backups.keys())
+
+        def delete_backup(self, name: str):
+            """Delete backup."""
+            if name in self.backups:
+                del self.backups[name]
+
+    return StateBackupManager()
+
+
+@pytest.fixture
+def frequency_tracker():
+    """
+    Provide frequency tracker for testing trade frequency persistence.
+    """
+    class FrequencyTracker:
+        def __init__(self):
+            self.trades: List[Dict] = []
+
+        def record_trade(self, account_id: str, symbol: str, timestamp: datetime):
+            """Record a trade."""
+            self.trades.append({
+                'account_id': account_id,
+                'symbol': symbol,
+                'timestamp': timestamp
+            })
+
+        def get_trade_count(self, account_id: str, window_seconds: int, current_time: datetime) -> int:
+            """Get trade count within sliding window."""
+            cutoff = current_time - timedelta(seconds=window_seconds)
+            return sum(
+                1 for trade in self.trades
+                if trade['account_id'] == account_id and trade['timestamp'] >= cutoff
+            )
+
+        def clear(self):
+            """Clear all trades."""
+            self.trades.clear()
+
+    return FrequencyTracker()
+
+
+@pytest.fixture
+def reconnection_metrics():
+    """
+    Provide reconnection metrics tracker for testing connection statistics.
+    """
+    @dataclass
+    class ReconnectionMetrics:
+        total_connections: int = 0
+        total_disconnects: int = 0
+        total_reconnects: int = 0
+        failed_reconnects: int = 0
+        event_gaps_detected: int = 0
+        reconciliations_performed: int = 0
+        connection_start_time: Optional[datetime] = None
+        last_disconnect_time: Optional[datetime] = None
+
+    return ReconnectionMetrics()
+
+
+# ============================================================================
+# Phase 4: CLI Interfaces Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def mock_daemon_api_client():
+    """
+    Provide mock DaemonAPIClient for CLI testing.
+
+    Simulates HTTP REST API responses from daemon on localhost:5555.
+    """
+    from unittest.mock import Mock, AsyncMock
+
+    client = Mock()
+    client.base_url = "http://127.0.0.1:5555"
+
+    # Health endpoint
+    client.get_health = Mock(return_value={
+        "status": "healthy",
+        "uptime_seconds": 3600,
+        "version": "1.0.0",
+        "memory_usage_mb": 125.5,
+        "cpu_usage_percent": 3.2,
+        "accounts": {}
+    })
+
+    # Positions endpoint
+    client.get_positions = Mock(return_value={
+        "account_id": "TEST123",
+        "positions": [],
+        "total_unrealized_pnl": 0.00
+    })
+
+    # PnL endpoint
+    client.get_pnl = Mock(return_value={
+        "account_id": "TEST123",
+        "realized_pnl_today": 0.00,
+        "unrealized_pnl": 0.00,
+        "combined_pnl": 0.00,
+        "daily_loss_limit": -500.00,
+        "daily_profit_target": 1000.00,
+        "lockout": False
+    })
+
+    # Enforcement log endpoint
+    client.get_enforcement_log = Mock(return_value={
+        "account_id": "TEST123",
+        "enforcement_actions": []
+    })
+
+    # Authentication endpoint
+    client.authenticate_admin = Mock(return_value=True)
+
+    # Daemon control endpoints
+    client.stop_daemon = Mock(return_value={
+        "status": "shutting_down",
+        "shutdown_eta_seconds": 5
+    })
+
+    # Config reload endpoint
+    client.reload_config = Mock(return_value={
+        "status": "success",
+        "message": "Configuration reloaded successfully"
+    })
+
+    # Close method
+    client.close = Mock()
+
+    return client
+
+
+@pytest.fixture
+def mock_rich_console():
+    """
+    Provide mock Rich console for CLI output testing.
+
+    Captures CLI output for assertions.
+    """
+    from unittest.mock import Mock
+
+    console = Mock()
+    console.print = Mock()
+    console.clear = Mock()
+    console.output_log = []  # Track all print calls
+
+    def capture_print(*args, **kwargs):
+        """Capture print calls for testing."""
+        console.output_log.append({
+            'args': args,
+            'kwargs': kwargs
+        })
+
+    console.print.side_effect = capture_print
+
+    return console
+
+
+@pytest.fixture
+def test_account_data():
+    """
+    Provide test account data for CLI display.
+    """
+    return {
+        "account_id": "TEST123",
+        "connected": True,
+        "positions": [
+            {
+                "symbol": "MNQ",
+                "side": "long",
+                "quantity": 2,
+                "entry_price": 5042.50,
+                "current_price": 5055.00,
+                "unrealized_pnl": 62.50
+            }
+        ],
+        "pnl": {
+            "realized_pnl_today": -150.00,
+            "unrealized_pnl": 62.50,
+            "combined_pnl": -87.50,
+            "daily_loss_limit": -500.00,
+            "daily_profit_target": 1000.00,
+            "lockout": False
+        }
+    }
+
+
+@pytest.fixture
+def test_enforcement_actions():
+    """
+    Provide test enforcement actions for log display.
+    """
+    return [
+        {
+            "timestamp": "2025-10-17T14:30:00Z",
+            "rule": "DailyLossLimit",
+            "action": "FLATTEN_ALL",
+            "result": "success",
+            "breach": True,  # Should display in RED
+            "position": {
+                "symbol": "MNQ",
+                "quantity": 2
+            }
+        },
+        {
+            "timestamp": "2025-10-17T14:25:00Z",
+            "rule": "MaxContracts",
+            "action": "CLOSE_EXCESS",
+            "result": "success",
+            "breach": False,
+            "position": {
+                "symbol": "ES",
+                "quantity": 1
+            }
+        }
+    ]
+
+
+@pytest.fixture
+def mock_admin_authentication():
+    """
+    Provide mock admin authentication flow.
+    """
+    class MockAuth:
+        def __init__(self):
+            self.attempts = 0
+            self.max_attempts = 3
+            self.correct_password = "admin_password"
+            self.authenticated = False
+
+        def authenticate(self, password: str) -> bool:
+            """Simulate authentication."""
+            self.attempts += 1
+            if password == self.correct_password:
+                self.authenticated = True
+                return True
+            if self.attempts >= self.max_attempts:
+                return False
+            return False
+
+        def reset(self):
+            """Reset authentication state."""
+            self.attempts = 0
+            self.authenticated = False
+
+    return MockAuth()
+
+
+@pytest.fixture
+def cli_test_environment(mock_daemon_api_client, mock_rich_console, test_account_data):
+    """
+    Provide complete CLI test environment with mocked dependencies.
+
+    Combines DaemonAPIClient, Rich console, and test data.
+    """
+    return {
+        'daemon_client': mock_daemon_api_client,
+        'console': mock_rich_console,
+        'account_data': test_account_data
     }
