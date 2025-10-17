@@ -83,7 +83,7 @@ class RiskDaemon:
 
         # Import test components
         from tests.conftest import FakeBrokerAdapter, FakeStateManager, FakeNotifier, FakeClock
-        from src.core.event_bus import EventBus
+        from src.daemon.event_bus import EventBus
         from src.core.risk_engine import RiskEngine
         from src.core.enforcement_engine import EnforcementEngine
 
@@ -121,13 +121,13 @@ class RiskDaemon:
         from src.adapters.sdk_adapter import SDKAdapter
         from src.adapters.event_normalizer import EventNormalizer
         from src.adapters.connection_manager import ConnectionManager
-        from src.core.event_bus import EventBus
+        from src.daemon.event_bus import EventBus
         from src.core.risk_engine import RiskEngine
         from src.core.enforcement_engine import EnforcementEngine
         from src.state.state_manager import StateManager
         from src.state.persistence import StatePersistence
         from src.monitoring.health_monitor import HealthMonitor
-        from src.notification.notifier import Notifier
+        from src.notifications.notifier import Notifier
 
         # Check for required environment variables
         api_key = os.getenv('PROJECT_X_API_KEY')
