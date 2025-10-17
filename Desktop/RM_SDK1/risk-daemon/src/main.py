@@ -260,16 +260,24 @@ class RiskDaemon:
         logger.debug(f"Session block config: {session_block_config}, type: {type(session_block_config)}")
 
         if isinstance(session_block_config, dict) and session_block_config.get('enabled', False):
-            from src.rules.session_block import SessionBlockOutsideRule
-            # Default session block: Mon-Fri, 8am-3pm CT
-            rules.append(SessionBlockOutsideRule(
-                allowed_days=["monday", "tuesday", "wednesday", "thursday", "friday"],
-                allowed_times=("08:00", "15:00")
-            ))
+            logger.debug("Loading SessionBlockOutsideRule...")
+            try:
+                from src.rules.session_block import SessionBlockOutsideRule
+                # Default session block: Mon-Fri, 8am-3pm CT
+                rule = SessionBlockOutsideRule(
+                    allowed_days=["monday", "tuesday", "wednesday", "thursday", "friday"],
+                    allowed_times=[{"start": "08:00", "end": "15:00"}]
+                )
+                rules.append(rule)
+                logger.debug("SessionBlockOutsideRule loaded successfully")
+            except Exception as e:
+                logger.error(f"Failed to load SessionBlockOutsideRule: {e}", exc_info=True)
+                raise
 
         # Add additional rules as configured
         # TODO: Load P0, P1, P2 rules based on priority configuration
 
+        logger.debug(f"Loaded {len(rules)} rules successfully")
         return rules
 
     async def _load_monitors(self):
