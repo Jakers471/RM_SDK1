@@ -11,6 +11,8 @@ dependencies = [
   "respx>=0.21",
   "mypy>=1.18.2",
   "ruff>=0.14.0",
+  "viztracer>=1.0.4",
+  "watchdog>=6.0.0",
 ]
 
 [tool.uv.sources]

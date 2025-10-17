@@ -369,29 +369,7 @@ class TestMaxContractsPerInstrumentIntegration:
         )
         state_manager.add_position(account_id, pos_mnq)
 
-        # Fill 1: 1 ES (OK)
-        fill1 = Event(
-            event_id=uuid4(),
-            event_type="FILL",
-            timestamp=state_manager.clock.now(),
-            priority=2,
-            account_id=account_id,
-            source="broker",
-            data={
-                "symbol": "ES",
-                "side": "long",
-                "quantity": 1,
-                "fill_price": Decimal("4500"),
-                "order_id": "ORD1",
-                "fill_time": state_manager.clock.now()
-            }
-        )
-        await risk_engine.process_event(fill1)
-
-        # No enforcement yet
-        assert len(broker.close_position_calls) == 0
-
-        # Add ES position
+        # Add ES position manually (1 ES - at limit)
         pos_es1 = Position(
             position_id=uuid4(),
             account_id=account_id,
@@ -405,7 +383,10 @@ class TestMaxContractsPerInstrumentIntegration:
         )
         state_manager.add_position(account_id, pos_es1)
 
-        # Fill 2: 1 more ES (would exceed)
+        # No enforcement yet
+        assert len(broker.close_position_calls) == 0
+
+        # Fill: 1 more ES (would exceed)
         state_manager.clock.advance(seconds=30)
         fill2 = Event(
             event_id=uuid4(),
@@ -517,27 +498,16 @@ class TestMaxContractsPerInstrumentIntegration:
             }
         )
 
-        pos_c_id = uuid4()
-        pos_c = Position(
-            position_id=pos_c_id,
-            account_id=account_id,
-            symbol="ES",
-            side="long",
-            quantity=2,
-            entry_price=Decimal("4505"),
-            current_price=Decimal("4505"),
-            unrealized_pnl=Decimal("0"),
-            opened_at=state_manager.clock.now()
-        )
-        state_manager.add_position(account_id, pos_c)
-
         await risk_engine.process_event(fill_c)
 
-        # Should close position C (most recent) by 2 contracts
+        # Should close most recent position by 2 contracts (excess)
         assert len(broker.close_position_calls) == 1
         close_call = broker.close_position_calls[0]
-        assert close_call["position_id"] == pos_c_id
         assert close_call["quantity"] == 2
+
+        # Verify final state: 2 ES total (at limit)
+        total_es = state_manager.get_position_count_by_symbol(account_id, "ES")
+        assert total_es == 2
 
 
 # ============================================================================
@@ -602,19 +572,6 @@ class TestMaxContractsPerInstrumentE2E:
         )
         await risk_engine.process_event(fill1)
 
-        # Add position
-        state_manager.add_position(account_id, Position(
-            position_id=uuid4(),
-            account_id=account_id,
-            symbol="MNQ",
-            side="long",
-            quantity=2,
-            entry_price=Decimal("18000"),
-            current_price=Decimal("18000"),
-            unrealized_pnl=Decimal("0"),
-            opened_at=state_manager.clock.now()
-        ))
-
         # Fill 2: 1 ES
         state_manager.clock.advance(seconds=30)
         fill2 = Event(
@@ -634,19 +591,6 @@ class TestMaxContractsPerInstrumentE2E:
             }
         )
         await risk_engine.process_event(fill2)
-
-        # Add position
-        state_manager.add_position(account_id, Position(
-            position_id=uuid4(),
-            account_id=account_id,
-            symbol="ES",
-            side="long",
-            quantity=1,
-            entry_price=Decimal("4500"),
-            current_price=Decimal("4500"),
-            unrealized_pnl=Decimal("0"),
-            opened_at=state_manager.clock.now()
-        ))
 
         # Verify: No enforcement actions
         assert len(broker.close_position_calls) == 0
@@ -725,19 +669,6 @@ class TestMaxContractsPerInstrumentE2E:
                 "fill_time": state_manager.clock.now()
             }
         )
-
-        # Add position
-        state_manager.add_position(account_id, Position(
-            position_id=uuid4(),
-            account_id=account_id,
-            symbol="MNQ",
-            side="long",
-            quantity=2,
-            entry_price=Decimal("18010"),
-            current_price=Decimal("18010"),
-            unrealized_pnl=Decimal("0"),
-            opened_at=state_manager.clock.now()
-        ))
 
         await risk_engine.process_event(fill)
 

@@ -413,7 +413,8 @@ class TestDailyRealizedProfitIntegration:
         # Setup: 2pm CT, lockout active
         import pytz
         chicago_tz = pytz.timezone("America/Chicago")
-        ct_2pm = chicago_tz.localize(clock.get_chicago_time().replace(hour=14, minute=0, second=0, microsecond=0))
+        ct_2pm_naive = clock.get_chicago_time().replace(hour=14, minute=0, second=0, microsecond=0, tzinfo=None)
+        ct_2pm = chicago_tz.localize(ct_2pm_naive)
         clock.set_time(ct_2pm.astimezone(clock._current_time.tzinfo))
 
         state_manager.get_account_state(account_id).realized_pnl_today = Decimal("500.00")

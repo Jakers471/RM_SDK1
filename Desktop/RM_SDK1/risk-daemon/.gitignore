@@ -4,3 +4,11 @@ __pycache__/
 *.pyc
 dist/
 build/
+
+# Reports directory (generated files, can be large)
+reports/
+.coverage
+*.coverage
+coverage.json
+*.html
+

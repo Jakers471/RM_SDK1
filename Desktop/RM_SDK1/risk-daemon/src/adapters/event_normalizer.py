@@ -30,18 +30,21 @@ class EventNormalizer:
 
     def __init__(
         self,
-        state_manager,
-        instrument_cache: InstrumentCache,
+        event_bus,
+        state_manager=None,
+        instrument_cache: Optional[InstrumentCache] = None,
         price_cache: Optional[PriceCache] = None
     ):
         """
         Initialize event normalizer.
 
         Args:
+            event_bus: EventBus instance to emit normalized events
             state_manager: State manager for position lookups
             instrument_cache: Cache for tick values
             price_cache: Optional price cache (created if None)
         """
+        self.event_bus = event_bus
         self.state_manager = state_manager
         self.instrument_cache = instrument_cache
         self.price_cache = price_cache or PriceCache()
@@ -529,3 +532,67 @@ class EventNormalizer:
             Cached price or None
         """
         return self.price_cache.get_price(symbol, allow_stale=True)
+
+    # SDK Event Handlers - called by SDKAdapter
+    async def on_order_filled(self, sdk_event):
+        """
+        Handle SDK ORDER_FILLED event.
+
+        Args:
+            sdk_event: SDK event from project-x-py
+        """
+        event = await self.normalize(sdk_event)
+        if event:
+            await self.event_bus.emit(event.event_type, event)
+
+    async def on_position_updated(self, sdk_event):
+        """
+        Handle SDK POSITION_UPDATED event.
+
+        Args:
+            sdk_event: SDK event from project-x-py
+        """
+        event = await self.normalize(sdk_event)
+        if event:
+            await self.event_bus.emit(event.event_type, event)
+
+    async def on_connection_lost(self, sdk_event):
+        """
+        Handle SDK CONNECTION_LOST event.
+
+        Args:
+            sdk_event: SDK event from project-x-py
+        """
+        event = await self.normalize(sdk_event)
+        if event:
+            await self.event_bus.emit(event.event_type, event)
+
+    async def on_quote_update(self, sdk_event):
+        """
+        Handle SDK QUOTE_UPDATE event.
+
+        Args:
+            sdk_event: SDK event from project-x-py
+        """
+        # Process quote update (updates price cache, no event emitted)
+        await self.normalize(sdk_event)
+
+    async def on_order_rejected(self, sdk_event):
+        """
+        Handle SDK ORDER_REJECTED event.
+
+        Args:
+            sdk_event: SDK event from project-x-py
+        """
+        # Log rejection (no event emitted)
+        await self.normalize(sdk_event)
+
+    async def on_order_placed(self, sdk_event):
+        """
+        Handle SDK ORDER_PLACED event.
+
+        Args:
+            sdk_event: SDK event from project-x-py
+        """
+        # Track placement (no event emitted)
+        await self.normalize(sdk_event)

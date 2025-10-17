@@ -241,6 +241,63 @@ class EnforcementEngine:
                     action=action.notification_action
                 )
 
+        elif action.action_type == "reject_fill":
+            # For reject_fill, close the most recently opened position (the one from the rejected fill)
+            positions = self.state_manager.get_open_positions(action.account_id)
+            if positions:
+                # Find the most recent position
+                most_recent = max(positions, key=lambda p: p.opened_at)
+                result = await self.close_position(
+                    account_id=action.account_id,
+                    position_id=most_recent.position_id,
+                    quantity=None,  # Close entire position
+                    reason=action.reason
+                )
+
+                # Send notification
+                if self.notifier and result.success:
+                    self.notifier.send(
+                        account_id=action.account_id,
+                        title="Fill Rejected",
+                        message=f"Fill rejected: {action.reason}",
+                        severity=action.notification_severity,
+                        reason=action.reason,
+                        action=action.notification_action
+                    )
+
+        elif action.action_type == "start_cooldown":
+            # Start cooldown timer
+            duration_seconds = action.duration_seconds or 0
+            self.state_manager.start_cooldown(
+                account_id=action.account_id,
+                duration_seconds=duration_seconds,
+                reason=action.reason
+            )
+
+            # Send notification
+            if self.notifier:
+                self.notifier.send(
+                    account_id=action.account_id,
+                    title="Cooldown Started",
+                    message=f"Cooldown activated: {action.reason}",
+                    severity=action.notification_severity,
+                    reason=action.reason,
+                    action=action.notification_action
+                )
+
+        elif action.action_type == "notify":
+            # Send notification only (no enforcement action)
+            if self.notifier:
+                message = action.message if hasattr(action, 'message') and action.message else action.reason
+                self.notifier.send(
+                    account_id=action.account_id,
+                    title="Risk Alert",
+                    message=message,
+                    severity=action.notification_severity,
+                    reason=action.reason,
+                    action=action.notification_action
+                )
+
     async def _execute_with_retry(self, func, max_retries: int, **kwargs):
         """
         Execute function with exponential backoff retry.

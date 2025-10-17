@@ -60,9 +60,18 @@ def instrument_cache():
 
 
 @pytest.fixture
-def event_normalizer(state_manager, instrument_cache):
+def event_bus():
+    """Provide mock event bus."""
+    from unittest.mock import MagicMock
+    bus = MagicMock()
+    bus.emit = AsyncMock()
+    return bus
+
+
+@pytest.fixture
+def event_normalizer(event_bus, state_manager, instrument_cache):
     """Provide EventNormalizer instance."""
-    return EventNormalizer(state_manager, instrument_cache)
+    return EventNormalizer(event_bus, state_manager, instrument_cache)
 
 
 # ============================================================================

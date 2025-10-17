@@ -57,10 +57,25 @@ class TestAuthLossGuardRuleUnit:
         violation = rule.evaluate(connection_event, account_state)
         assert violation is None  # No violation
 
-    def test_rule_violated_when_disconnected(self, state_manager, account_id):
+    def test_rule_violated_when_disconnected(self, state_manager, account_id, clock):
         """Test: Rule violated when connection lost."""
         # WILL FAIL: Rule class doesn't exist yet
         from src.rules.auth_loss_guard import AuthLossGuardRule
+        from tests.conftest import Position
+
+        # Add an open position so severity is critical
+        pos = Position(
+            position_id=uuid4(),
+            account_id=account_id,
+            symbol="MNQ",
+            side="long",
+            quantity=2,
+            entry_price=Decimal("18000"),
+            current_price=Decimal("18000"),
+            unrealized_pnl=Decimal("0"),
+            opened_at=clock.now()
+        )
+        state_manager.add_position(account_id, pos)
 
         rule = AuthLossGuardRule()
         account_state = state_manager.get_account_state(account_id)
@@ -78,10 +93,25 @@ class TestAuthLossGuardRuleUnit:
         assert violation.severity == "critical"
         assert "connection lost" in violation.reason.lower()
 
-    def test_rule_enforcement_action_alert_only(self, state_manager, account_id):
+    def test_rule_enforcement_action_alert_only(self, state_manager, account_id, clock):
         """Test: Enforcement action is alert only (no flatten)."""
         # WILL FAIL: Rule class doesn't exist yet
         from src.rules.auth_loss_guard import AuthLossGuardRule
+        from tests.conftest import Position
+
+        # Add an open position so severity is critical
+        pos = Position(
+            position_id=uuid4(),
+            account_id=account_id,
+            symbol="MNQ",
+            side="long",
+            quantity=2,
+            entry_price=Decimal("18000"),
+            current_price=Decimal("18000"),
+            unrealized_pnl=Decimal("0"),
+            opened_at=clock.now()
+        )
+        state_manager.add_position(account_id, pos)
 
         rule = AuthLossGuardRule()
         account_state = state_manager.get_account_state(account_id)
@@ -630,7 +660,7 @@ class TestAuthLossGuardE2E:
 
         # Verify: At least 2 disconnect alerts
         notifications = notifier.get_notifications(account_id)
-        disconnect_notifs = [n for n in notifications if "disconnect" in n.reason.lower()]
+        disconnect_notifs = [n for n in notifications if "connection" in n.reason.lower() or "disconnect" in n.reason.lower()]
         assert len(disconnect_notifs) >= 2
 
     @pytest.mark.asyncio

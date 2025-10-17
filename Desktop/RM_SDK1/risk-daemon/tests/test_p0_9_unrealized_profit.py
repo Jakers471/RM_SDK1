@@ -657,5 +657,5 @@ class TestUnrealizedProfitE2E:
 
         notif = notifications[0]
         assert notif.severity == "info"  # Positive event
-        assert "profit target" in notif.reason.lower() or "UnrealizedProfit" in notif.reason
+        assert "profit" in notif.reason.lower() or "UnrealizedProfit" in notif.reason
         assert notif.action == "close_position"

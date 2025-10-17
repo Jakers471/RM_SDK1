@@ -557,3 +557,112 @@ def sample_position(account_id, clock):
         unrealized_pnl=Decimal("0.00"),
         opened_at=clock.now()
     )
+
+
+# ============================================================================
+# Configuration Test Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def valid_system_config():
+    """Provide valid system configuration dictionary for testing."""
+    return {
+        "version": "1.0",
+        "daemon": {
+            "auto_start": True,
+            "log_level": "info",
+            "state_persistence_path": "~/.risk_manager/state",
+            "daily_reset_time": "17:00",
+            "timezone": "America/Chicago"
+        },
+        "admin": {
+            "password_hash": "$2b$12$" + "a" * 53,  # Valid bcrypt hash format
+            "require_auth": True
+        },
+        "sdk": {
+            "connection_timeout": 30,
+            "reconnect_attempts": 5,
+            "reconnect_delay": 10
+        }
+    }
+
+
+@pytest.fixture
+def valid_accounts_config():
+    """Provide valid accounts configuration dictionary for testing."""
+    return {
+        "accounts": [
+            {
+                "account_id": "ACC001",
+                "account_name": "Test TopStep Account",
+                "enabled": True,
+                "broker": "topstepx",
+                "credentials": {
+                    "api_key": "${TOPSTEP_API_KEY}",
+                    "api_secret": "${TOPSTEP_API_SECRET}",
+                    "account_number": "TS123456"
+                },
+                "risk_profile": "conservative"
+            }
+        ]
+    }
+
+
+@pytest.fixture
+def valid_risk_rules_config():
+    """Provide valid risk rules configuration dictionary for testing."""
+    return {
+        "profiles": {
+            "conservative": {
+                "rules": [
+                    {
+                        "rule": "MaxContracts",
+                        "enabled": True,
+                        "params": {"max_contracts": 2}
+                    },
+                    {
+                        "rule": "DailyRealizedLoss",
+                        "enabled": True,
+                        "params": {"limit": -500.00}
+                    },
+                    {
+                        "rule": "UnrealizedLoss",
+                        "enabled": True,
+                        "params": {"limit": -200.00}
+                    }
+                ]
+            },
+            "aggressive": {
+                "rules": [
+                    {
+                        "rule": "MaxContracts",
+                        "enabled": True,
+                        "params": {"max_contracts": 10}
+                    },
+                    {
+                        "rule": "DailyRealizedLoss",
+                        "enabled": True,
+                        "params": {"limit": -2000.00}
+                    }
+                ]
+            }
+        },
+        "account_overrides": {}
+    }
+
+
+@pytest.fixture
+def valid_notifications_config():
+    """Provide valid notifications configuration dictionary for testing."""
+    return {
+        "discord": {
+            "enabled": True,
+            "webhook_url": "https://discord.com/api/webhooks/123456789/test_token"
+        },
+        "telegram": {
+            "enabled": False,
+            "bot_token": "",
+            "chat_id": ""
+        }
+    }

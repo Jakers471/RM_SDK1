@@ -99,9 +99,13 @@ class AuthLossGuardRule(RiskRule):
             positions_count = len(open_positions)
             symbols = [p.symbol for p in open_positions]
 
+            # Determine severity based on whether there are open positions
+            # If no positions, lower severity (info); if positions exist, critical
+            severity = "critical" if positions_count > 0 else "info"
+
             return RuleViolation(
                 rule_name=self.name,
-                severity="critical",
+                severity=severity,
                 reason=f"Connection lost: Authentication or network failure detected. Manual intervention required.",
                 account_id=account_id,
                 timestamp=disconnect_time,
@@ -152,14 +156,15 @@ class AuthLossGuardRule(RiskRule):
         )
 
         # Use "notify" action type for alert-only
+        # Use severity from violation (critical if positions, info if no positions)
         return EnforcementAction(
             action_type="notify",
             account_id=violation.account_id,
             reason=violation.reason,
             timestamp=violation.timestamp,
-            severity="critical",
+            severity=violation.severity,
             message=message,
-            notification_severity="critical",
+            notification_severity=violation.severity,
             notification_action="notify"
         )
 

@@ -265,26 +265,8 @@ class TestNoStopLossGraceIntegration:
             rules=[rule]
         )
 
-        # T=0: Fill event creates position
-        fill_event = Event(
-            event_id=uuid4(),
-            event_type="FILL",
-            timestamp=clock.now(),
-            priority=2,
-            account_id=account_id,
-            source="broker",
-            data={
-                "symbol": "MNQ",
-                "side": "long",
-                "quantity": 2,
-                "fill_price": Decimal("18000"),
-                "order_id": "ORD123",
-                "fill_time": clock.now()
-            }
-        )
-        await risk_engine.process_event(fill_event)
-
-        # Add position manually (simulating fill processing)
+        # T=0: Add position manually (simulating fill processing)
+        # We don't process FILL event here to avoid double creation
         position_id = uuid4()
         position = Position(
             position_id=position_id,
