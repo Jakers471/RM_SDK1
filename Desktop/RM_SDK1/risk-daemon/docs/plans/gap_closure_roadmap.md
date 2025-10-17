@@ -174,7 +174,7 @@ Harden connection handling and verify state persistence/recovery.
 ### Components
 
 #### 21. Connection Manager Hardening
-**Architecture Doc**: `architecture/21-connection-resilience.md` *(to be created)*
+**Architecture Doc**: `architecture/21-connection-resilience.md` ✅ **COMPLETED** (963 lines)
 **Estimated Effort**: 2 days
 **Priority**: P0 (critical for reliability)
 **Dependencies**: Logging (20)
@@ -197,7 +197,7 @@ Harden connection handling and verify state persistence/recovery.
 - [ ] Graceful handling of broker downtime
 
 #### 22. State Recovery & Verification Testing
-**Architecture Doc**: `architecture/22-state-recovery-testing.md` *(to be created)*
+**Architecture Doc**: `architecture/22-state-recovery-testing.md` ✅ **COMPLETED** (978 lines)
 **Estimated Effort**: 2 days
 **Priority**: P1 (verification/testing focus)
 **Dependencies**: Connection Manager (21)
@@ -253,31 +253,54 @@ Provide admin control and trader monitoring interfaces.
 - [ ] Service restarts automatically after crash
 - [ ] Graceful shutdown persists state
 
-#### 18. Admin CLI Implementation
-**Architecture Doc**: `architecture/18-admin-cli-implementation.md` *(to be created)*
-**Estimated Effort**: 2 days
-**Priority**: P0 (required for management)
-**Dependencies**: IPC (23), Service Wrapper (17)
+#### 18. CLI Interfaces Implementation (Admin + Trader)
+**Architecture Doc**: `architecture/18-cli-interfaces-implementation.md` ✅ **COMPLETED** (2,090 lines)
+**Estimated Effort**: 3-4 days
+**Priority**: P0 (required for management and monitoring)
+**Dependencies**: IPC (23), Service Wrapper (17), Logging (20)
+
+**CLI Role Distinctions** (per user requirements):
+- **Admin CLI**: Password-protected configuration interface - NO logs displayed in CLI (logs are file-based only)
+- **Trader CLI**: Daily monitoring interface - enforcement log displays BREACHES IN RED TEXT
+- **Daemon**: 24/7 background service - unkillable without admin privileges
 
 **Implementation Tasks**:
-1. Build interactive menu system (using `rich` library for colors)
-2. Implement password authentication (bcrypt verification)
-3. Create daemon control commands (start, stop, restart, view logs)
-4. Create configuration editor (interactive prompts)
-5. Create account management (add, edit, enable/disable)
-6. Create risk rule editor (modify params, change profiles)
-7. Implement log viewing (live tail, search, filter)
-8. Add system status dashboard
-9. Integrate with IPC API for all commands
-10. Write CLI integration tests
+1. Create base CLI class with shared UI functions (menus, prompts, validation)
+2. **Admin CLI**: Build password-protected configuration interface
+   - Daemon control (start, stop, restart)
+   - Configuration editor (view, edit, reload, backup/restore)
+   - Account management (add, edit, enable/disable)
+   - Risk rule editor (modify params, profiles)
+   - System status dashboard
+   - **IMPORTANT**: NO logs displayed in Admin CLI (logs are file-based only)
+3. **Trader CLI**: Build read-only monitoring interface
+   - Live dashboard with auto-refresh (positions, PnL, limits)
+   - Positions viewer with unrealized PnL
+   - Risk rules viewer (read-only, cannot modify)
+   - **Enforcement log with BREACHES IN RED TEXT** (visual alert for violations)
+   - **Clock in/out feature** (track trader session times)
+   - **Risk limit time tracker** (shows cooldown periods after rule breach)
+   - **Current time and date display** (always visible in dashboard)
+   - Connection status monitoring
+   - Switch to Admin mode (with password authentication)
+   - **IMPORTANT**: Cannot start/stop daemon (read-only access)
+4. Integrate both CLIs with DaemonAPIClient from IPC layer
+5. Write unit tests for CLI logic and integration tests for daemon communication
 
 **Success Criteria**:
-- [ ] Admin can authenticate with password
+- [ ] Admin CLI authenticates with HMAC challenge-response
 - [ ] Admin can start/stop/restart daemon
-- [ ] Admin can add/edit accounts
-- [ ] Admin can modify risk rules
-- [ ] Admin can view live logs
-- [ ] All commands provide clear feedback
+- [ ] Admin can add/edit accounts and modify risk rules
+- [ ] Admin can view system status (NO logs in CLI - file-based only)
+- [ ] Trader CLI displays live dashboard with auto-refresh
+- [ ] Trader CLI shows BREACHES IN RED TEXT in enforcement log
+- [ ] Trader CLI has clock in/out feature
+- [ ] Trader CLI shows risk limit time tracker with cooldown periods
+- [ ] Trader CLI displays current time and date
+- [ ] Trader can view positions and enforcement log (read-only)
+- [ ] Trader can seamlessly switch to Admin mode with password
+- [ ] Both CLIs handle daemon not running gracefully
+- [ ] Daemon runs as unkillable service (admin privileges required to stop)
 
 ---
 
@@ -546,12 +569,12 @@ Before deploying to live trading:
 | 21 | Connection Hardening | P0 | 2 days | 20 | 22 | 0% |
 | 22 | State Recovery Testing | P1 | 2 days | 21 | - | 40% (partial) |
 | 17 | Service Wrapper | P0 | 2 days | 16, 20, 23 | 18 | 0% |
-| 18 | Admin CLI | P0 | 2 days | 23, 17 | - | 0% |
+| 18 | CLI Interfaces (Admin + Trader) | P0 | 3-4 days | 23, 17, 20 | - | 0% |
 | 19 | Notifications | P1 | 3 days | 16, 20 | - | 0% |
 
-**Total P0 Effort**: 15-17 days
+**Total P0 Effort**: 16-19 days
 **Total P1 Effort**: 5 days
-**Critical Path**: 16 → 20 → 23 → 17 → 18 (13 days minimum)
+**Critical Path**: 16 → 20 → 23 → 17 → 18 (14-15 days minimum)
 
 ---
 
@@ -562,10 +585,10 @@ All detailed implementation specifications:
 - `architecture/17-service-wrapper-nssm.md` ✅ - NSSM integration, installation scripts (Phase 1)
 - `architecture/20-logging-framework.md` ✅ - Python logging, rotation, structured format, async writes (Phase 2)
 - `architecture/23-ipc-protocol-spec.md` ✅ - FastAPI HTTP API, HMAC auth, client library (Phase 2)
-- `architecture/18-admin-cli-implementation.md` ⏳ - Interactive menus, authentication, IPC *(to be created in Phase 4)*
+- `architecture/21-connection-resilience.md` ✅ - State reconciliation, event replay, partial disconnect handling (Phase 3)
+- `architecture/22-state-recovery-testing.md` ✅ - Crash recovery tests, corruption detection, manual recovery procedures (Phase 3)
+- `architecture/18-cli-interfaces-implementation.md` ✅ - Admin + Trader CLIs, rich terminal UI, HMAC auth, live dashboard (Phase 4)
 - `architecture/19-notification-providers.md` ⏳ - Discord/Telegram APIs, retry logic *(to be created in Phase 5)*
-- `architecture/21-connection-resilience.md` ⏳ - Reconnection, state reconciliation *(to be created in Phase 3)*
-- `architecture/22-state-recovery-testing.md` ⏳ - Crash recovery, verification procedures *(to be created in Phase 3)*
 
 ---
 
