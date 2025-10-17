@@ -124,8 +124,9 @@ class SDKAdapter:
 
             try:
                 # Close TradingSuite connections
+                # CRITICAL: SDK v3.3.0 renamed close() to disconnect()
                 if self.suite:
-                    await self.suite.close()
+                    await self.suite.disconnect()
 
                 self._connected = False
                 self.suite = None
@@ -173,6 +174,8 @@ class SDKAdapter:
             )
 
             # Convert SDK positions to internal Position format
+            # CRITICAL: SDK Position model does NOT include unrealized_pnl, current_price, or realized_pnl
+            # These must be calculated/fetched separately (see sdk_integration_challenges.md Issue #1)
             positions = []
             for sdk_pos in sdk_positions:
                 # Extract symbol from contract ID (e.g., "CON.F.US.MNQ.U25" -> "MNQ")
@@ -181,30 +184,76 @@ class SDKAdapter:
                 # Import Position from conftest for tests
                 from tests.conftest import Position
 
-                # Helper to safely convert to Decimal
-                def to_decimal(value) -> Decimal:
-                    if isinstance(value, Decimal):
-                        return value
-                    if isinstance(value, (int, float)):
-                        return Decimal(str(value))
-                    # For test mocks or other objects, try direct conversion
+                # 1. Transform SDK Position.type (int) to daemon side (string)
+                # SDK: type=1 (LONG), type=2 (SHORT)
+                # Daemon: side="long", side="short"
+                if hasattr(sdk_pos, 'type'):
+                    # Real SDK Position
+                    side = "long" if sdk_pos.type == 1 else "short"
+                elif hasattr(sdk_pos, 'side'):
+                    # Mock position (already has side string)
+                    side = sdk_pos.side
+                else:
+                    side = "long"  # Default fallback
+
+                # 2. Map SDK field names to daemon field names
+                # SDK: size (int) → Daemon: quantity (int)
+                quantity = sdk_pos.size if hasattr(sdk_pos, 'size') else sdk_pos.quantity
+
+                # SDK: averagePrice (float) → Daemon: entry_price (Decimal)
+                if hasattr(sdk_pos, 'averagePrice'):
+                    entry_price = Decimal(str(sdk_pos.averagePrice))
+                elif hasattr(sdk_pos, 'avgEntryPrice'):
+                    entry_price = Decimal(str(sdk_pos.avgEntryPrice))
+                else:
+                    entry_price = sdk_pos.entry_price if hasattr(sdk_pos, 'entry_price') else Decimal('0.0')
+
+                # 3. Fetch current price (SDK Position does NOT include this)
+                if hasattr(sdk_pos, 'currentPrice'):
+                    # Mock position already has current_price
+                    current_price = Decimal(str(sdk_pos.currentPrice))
+                else:
+                    # Real SDK Position - must fetch from market data
                     try:
-                        # If value is already numeric, convert it
-                        return Decimal(str(value))
-                    except:
-                        # If conversion fails, return as-is (for test mocks)
-                        return value
+                        current_price = await self.get_current_price(symbol)
+                    except PriceError:
+                        # If price unavailable, use entry price as fallback
+                        current_price = entry_price
+
+                # 4. Calculate unrealized P&L (SDK Position does NOT include this)
+                if hasattr(sdk_pos, 'unrealizedPnl'):
+                    # Mock position already has unrealized_pnl
+                    unrealized_pnl = Decimal(str(sdk_pos.unrealizedPnl))
+                else:
+                    # Real SDK Position - must calculate
+                    # Formula: (current_price - entry_price) * quantity * tick_value * direction
+                    # Direction: +1 for LONG, -1 for SHORT
+                    try:
+                        tick_value = await self.get_instrument_tick_value(symbol)
+                        direction = 1 if side == "long" else -1
+                        price_diff = (current_price - entry_price) * direction
+                        unrealized_pnl = price_diff * Decimal(str(quantity)) * tick_value
+                    except InstrumentError:
+                        # If tick value unavailable, P&L = 0
+                        unrealized_pnl = Decimal('0.0')
+
+                # 5. Map opened_at timestamp
+                opened_at = None
+                if hasattr(sdk_pos, 'creationTimestamp'):
+                    opened_at = sdk_pos.creationTimestamp
+                elif hasattr(sdk_pos, 'openedAt'):
+                    opened_at = sdk_pos.openedAt
 
                 position = Position(
                     position_id=sdk_pos.id,
                     account_id=target_account,
                     symbol=symbol,
-                    side=sdk_pos.side,  # "long" or "short"
-                    quantity=sdk_pos.quantity,
-                    entry_price=to_decimal(sdk_pos.avgEntryPrice),
-                    current_price=to_decimal(sdk_pos.currentPrice),
-                    unrealized_pnl=to_decimal(sdk_pos.unrealizedPnl),
-                    opened_at=sdk_pos.openedAt if hasattr(sdk_pos, 'openedAt') else None
+                    side=side,
+                    quantity=quantity,
+                    entry_price=entry_price,
+                    current_price=current_price,
+                    unrealized_pnl=unrealized_pnl,
+                    opened_at=opened_at
                 )
                 positions.append(position)
 
